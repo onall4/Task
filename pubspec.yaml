@@ -1,0 +1,38 @@
+name: frontend
+description: "A new Flutter project."
+publish_to: 'none'
+version: 0.1.0+1
+
+environment:
+  sdk: ^3.11.5
+
+dependencies:
+  dio: ^5.9.2
+  drift: ^2.33.0
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+  flutter_riverpod: ^3.3.1
+  intl: ^0.20.2
+  path: ^1.9.1
+  path_provider: ^2.1.5
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  build_runner: ^2.15.0
+  drift_dev: ^2.33.0
+
+flutter:
+  uses-material-design: true
+
+# sqlite3 v3 默认会在构建阶段下载预编译的 SQLite 二进制。
+# 当前项目为了避免依赖外网下载，也避免继续受 Android 系统库加载限制影响，
+# 改为直接使用本地 vendored 的 sqlite3.c 源码进行编译。
+hooks:
+  user_defines:
+    sqlite3:
+      source: source
+      path: vendor/sqlite3/sqlite3.c
