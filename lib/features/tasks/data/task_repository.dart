@@ -215,11 +215,14 @@ final taskStatusFilterProvider = StateProvider<TaskStatusFilter>(
   (ref) => TaskStatusFilter.all,
 );
 
-/// 控制“已完成”分组是否折叠。
+/// 控制”已完成”分组是否折叠。
 final completedCollapsedProvider = StateProvider<bool>((ref) => true);
 
-/// 控制“进行中”分组是否折叠。
+/// 控制”进行中”分组是否折叠。
 final activeCollapsedProvider = StateProvider<bool>((ref) => false);
+
+/// 控制”已过期”分组是否折叠。
+final overdueCollapsedProvider = StateProvider<bool>((ref) => false);
 
 /// 任务仓储实现。
 ///

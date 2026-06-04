@@ -831,51 +831,67 @@ Future<void> _showHabitEditor(
   WidgetRef ref,
   AppStrings strings,
 ) async {
-  final controller = TextEditingController();
-  String? errorText;
   final created = await showDialog<String>(
     context: context,
-    builder: (context) {
-      return StatefulBuilder(
-        builder: (context, setDialogState) {
-          return AlertDialog(
-            title: Text(strings.addHabit),
-            content: TextField(
-              controller: controller,
-              autofocus: true,
-              maxLength: 30,
-              decoration: InputDecoration(
-                labelText: strings.habitTitle,
-                errorText: errorText,
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(),
-                child: Text(strings.cancel),
-              ),
-              FilledButton(
-                onPressed: () {
-                  final value = controller.text.trim();
-                  if (value.isEmpty) {
-                    setDialogState(() => errorText = strings.habitRequired);
-                    return;
-                  }
-                  Navigator.of(context).pop(value);
-                },
-                child: Text(strings.save),
-              ),
-            ],
-          );
-        },
-      );
-    },
+    builder: (context) => _HabitEditorDialog(strings: strings),
   );
-  controller.dispose();
   if (created == null) {
     return;
   }
   await ref.read(habitControllerProvider.notifier).createHabit(title: created);
+}
+
+class _HabitEditorDialog extends StatefulWidget {
+  const _HabitEditorDialog({required this.strings});
+
+  final AppStrings strings;
+
+  @override
+  State<_HabitEditorDialog> createState() => _HabitEditorDialogState();
+}
+
+class _HabitEditorDialogState extends State<_HabitEditorDialog> {
+  late final _controller = TextEditingController();
+  String? _errorText;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(widget.strings.addHabit),
+      content: TextField(
+        controller: _controller,
+        autofocus: true,
+        maxLength: 30,
+        decoration: InputDecoration(
+          labelText: widget.strings.habitTitle,
+          errorText: _errorText,
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: Text(widget.strings.cancel),
+        ),
+        FilledButton(
+          onPressed: () {
+            final value = _controller.text.trim();
+            if (value.isEmpty) {
+              setState(() => _errorText = widget.strings.habitRequired);
+              return;
+            }
+            Navigator.of(context).pop(value);
+          },
+          child: Text(widget.strings.save),
+        ),
+      ],
+    );
+  }
 }
 
 class _WeekdayHeaderRow extends StatelessWidget {

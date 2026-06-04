@@ -83,10 +83,10 @@ class _HomePageState extends ConsumerState<HomePage> {
     final tasksAsync = ref.watch(taskListProvider);
     final activeCollapsed = ref.watch(activeCollapsedProvider);
     final completedCollapsed = ref.watch(completedCollapsedProvider);
+    final overdueCollapsed = ref.watch(overdueCollapsedProvider);
     final isSelectionMode = ref.watch(taskSelectionModeProvider);
     final selectedIds = ref.watch(selectedTaskIdsProvider);
     final selectedLabel = ref.watch(selectedTaskLabelProvider);
-    final schedules = ref.watch(taskScheduleControllerProvider);
     final searchQuery = ref.watch(taskSearchQueryProvider);
     final priorityFilter = ref.watch(taskPriorityFilterProvider);
     final statusFilter = ref.watch(taskStatusFilterProvider);
@@ -97,7 +97,6 @@ class _HomePageState extends ConsumerState<HomePage> {
         _syncSearchController(searchQuery);
         final today = taskDateOnly(DateTime.now());
         final scopedTasks = tasks
-            .where((task) => _matchesHomeScope(task, schedules, today))
             .where((task) => _matchesHomeFilters(
                   task,
                   selectedLabel,
@@ -106,26 +105,41 @@ class _HomePageState extends ConsumerState<HomePage> {
                   statusFilter,
                 ))
             .toList(growable: false);
+        final overdueTasks = tasks
+            .where((task) => task.status == TaskStatus.active.value)
+            .where((task) => task.dueAt != null && task.dueAt!.isBefore(today))
+            .where((task) => _matchesHomeFilters(
+                  task,
+                  selectedLabel,
+                  searchQuery,
+                  priorityFilter,
+                  statusFilter,
+                ))
+            .toList(growable: false);
+        final overdueTaskIds = overdueTasks.map((task) => task.id).toSet();
+        final scopedWithoutOverdue = scopedTasks
+            .where((task) => !overdueTaskIds.contains(task.id))
+            .toList(growable: false);
         final scopedMoves = _sectionMoves.values
             .where(
               (move) =>
-                  _matchesHomeScope(move.task, schedules, today) &&
                   _matchesHomeFilters(
                     move.task,
                     selectedLabel,
                     searchQuery,
                     priorityFilter,
                     statusFilter,
-                  ),
+                  ) &&
+                  !overdueTaskIds.contains(move.task.id),
             )
             .toList(growable: false);
-        final activeTasks = _buildActiveTasks(scopedTasks, scopedMoves);
+        final activeTasks = _buildActiveTasks(scopedWithoutOverdue, scopedMoves);
         final orderedActiveTasks = _applyOptimisticOrder(activeTasks);
         final visibleActiveTasks =
             activeCollapsed && _activeSectionAnimatingToCollapsed != true
             ? <Task>[]
             : orderedActiveTasks;
-        final pendingCompletedTasks = scopedTasks
+        final pendingCompletedTasks = scopedWithoutOverdue
             .where(
               (task) =>
                   task.status == TaskStatus.active.value &&
@@ -134,7 +148,7 @@ class _HomePageState extends ConsumerState<HomePage> {
             .map(_buildOptimisticCompletedTask)
             .toList();
         final completedTasks = _buildCompletedTasks(
-          scopedTasks,
+          scopedWithoutOverdue,
           scopedMoves,
           pendingCompletedTasks,
         );
@@ -260,14 +274,23 @@ class _HomePageState extends ConsumerState<HomePage> {
                 ),
               ],
             ),
-            footer: _buildCompletedTasksFooter(
-              ref,
-              completedTasks,
-              scopedMoves,
-              completedCollapsed,
-              isSelectionMode,
-              selectedIds,
-              strings,
+            footer: Column(
+              children: [
+                _buildCompletedTasksFooter(
+                  ref,
+                  completedTasks,
+                  scopedMoves,
+                  completedCollapsed,
+                  isSelectionMode,
+                  selectedIds,
+                  strings,
+                ),
+                _buildOverdueTasksFooter(
+                  overdueTasks,
+                  overdueCollapsed,
+                  strings,
+                ),
+              ],
             ),
             itemBuilder: (context, index) {
               if (index == visibleActiveTasks.length) {
@@ -398,22 +421,6 @@ class _HomePageState extends ConsumerState<HomePage> {
       text: query,
       selection: TextSelection.collapsed(offset: query.length),
     );
-  }
-
-  bool _matchesHomeScope(
-    Task task,
-    Map<String, TaskScheduleMetadata> schedules,
-    DateTime today,
-  ) {
-    final schedule = effectiveTaskSchedule(task, schedules);
-    if (task.status == TaskStatus.completed.value) {
-      final completedAt = task.completedAt;
-      return completedAt != null && isSameTaskDate(completedAt, today);
-    }
-    if (schedule.scheduledDate == null && task.dueAt == null) {
-      return true;
-    }
-    return taskOccursOnDate(task, schedule, today);
   }
 
   bool _matchesHomeFilters(
@@ -1216,6 +1223,98 @@ class _HomePageState extends ConsumerState<HomePage> {
     );
   }
 
+  /// 构建已过期任务区域，放在已完成区域下方。
+  Widget _buildOverdueTasksFooter(
+    List<Task> overdueTasks,
+    bool collapsed,
+    AppStrings strings,
+  ) {
+    return Column(
+      children: [
+        _buildOverdueDivider(overdueTasks, collapsed, strings),
+        AnimatedSwitcher(
+          duration: _completedSectionAnimationDuration,
+          switchInCurve: Curves.easeOutCubic,
+          switchOutCurve: Curves.easeInCubic,
+          transitionBuilder: _buildSectionTransition,
+          child: collapsed
+              ? const SizedBox.shrink(key: ValueKey('overdue-collapsed'))
+              : KeyedSubtree(
+                  key: const ValueKey('overdue-expanded'),
+                  child: Column(
+                    children: [
+                      for (var i = 0; i < overdueTasks.length; i++)
+                        _buildMeasuredTaskSlot(
+                          slotName: 'overdue',
+                          taskId: overdueTasks[i].id,
+                          moveSlot: null,
+                          child: GestureDetector(
+                            key: ValueKey('overdue-${overdueTasks[i].id}'),
+                            child: TaskCard(
+                              task: overdueTasks[i],
+                              strings: strings,
+                              onEditTap: () {
+                                _openTaskEditor(context, overdueTasks[i]);
+                              },
+                              onTap: () {
+                                _openTaskDetails(context, overdueTasks[i], strings);
+                              },
+                              onCompleteToggle: () {
+                                ref
+                                    .read(taskRepositoryProvider)
+                                    .toggleCompleted(overdueTasks[i]);
+                              },
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildOverdueDivider(
+    List<Task> overdueTasks,
+    bool collapsed,
+    AppStrings strings,
+  ) {
+    return SizedBox(
+      height: _listItemExtent,
+      child: Padding(
+        padding: const EdgeInsets.only(bottom: _listItemGap),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(18),
+          onTap: () {
+            ref.read(overdueCollapsedProvider.notifier).state = !collapsed;
+          },
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            child: Row(
+              children: [
+                _SectionLabel(
+                  title: strings.overdue,
+                  subtitle: strings.itemCount(overdueTasks.length),
+                ),
+                const Spacer(),
+                AnimatedRotation(
+                  turns: collapsed ? 0 : 0.5,
+                  duration: _completedSectionAnimationDuration,
+                  curve: Curves.easeInOutCubic,
+                  child: const Icon(
+                    Icons.expand_more_rounded,
+                    color: Color(0xFF68756F),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   void _openTaskEditor(BuildContext context, Task task) {
     final schedules = ref.read(taskScheduleControllerProvider);
     Navigator.of(context).push(
@@ -1363,36 +1462,44 @@ class _HomeSearchAndFilterBar extends StatelessWidget {
       child: Row(
         children: [
           Expanded(
-            child: Container(
+            child: SizedBox(
               height: 46,
-              decoration: BoxDecoration(
-                color: background,
-                borderRadius: BorderRadius.circular(18),
-                border: Border.all(color: borderColor),
-              ),
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              child: Row(
-                children: [
-                  Icon(Icons.search_rounded, size: 20, color: foreground),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: TextField(
-                      controller: searchController,
-                      onChanged: onSearchChanged,
-                      decoration: InputDecoration(
-                        hintText: strings.searchTasks,
-                        border: InputBorder.none,
-                        isDense: true,
-                      ),
-                    ),
+              child: TextField(
+                controller: searchController,
+                onChanged: onSearchChanged,
+                expands: true,
+                maxLines: null,
+                minLines: null,
+                textAlignVertical: TextAlignVertical.center,
+                decoration: InputDecoration(
+                  hintText: strings.searchTasks,
+                  filled: true,
+                  fillColor: background,
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(18),
+                    borderSide: BorderSide(color: borderColor),
                   ),
-                  if (searchQuery.isNotEmpty)
-                    IconButton(
-                      visualDensity: VisualDensity.compact,
-                      onPressed: () => onSearchChanged(''),
-                      icon: const Icon(Icons.close_rounded, size: 18),
-                    ),
-                ],
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(18),
+                    borderSide: BorderSide(color: borderColor),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(18),
+                    borderSide: BorderSide(color: borderColor),
+                  ),
+                  prefixIcon: Icon(Icons.search_rounded, size: 20, color: foreground),
+                  prefixIconConstraints: const BoxConstraints(minWidth: 36, minHeight: 0),
+                  suffixIcon: searchQuery.isNotEmpty
+                      ? IconButton(
+                          visualDensity: VisualDensity.compact,
+                          onPressed: () => onSearchChanged(''),
+                          icon: const Icon(Icons.close_rounded, size: 18),
+                        )
+                      : null,
+                  suffixIconConstraints: const BoxConstraints(minWidth: 36, minHeight: 0),
+                  isDense: true,
+                ),
               ),
             ),
           ),
