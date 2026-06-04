@@ -244,6 +244,9 @@ class TaskNetShell extends ConsumerWidget {
     }
 
     await ref.read(taskRepositoryProvider).deleteTasks(selectedIds);
+    await ref.read(taskScheduleControllerProvider.notifier).removeSchedules(
+          selectedIds,
+        );
     _exitSelectionMode(ref);
   }
 

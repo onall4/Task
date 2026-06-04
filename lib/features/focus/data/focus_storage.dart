@@ -32,10 +32,10 @@ class FocusStorage {
       }
       final content = await file.readAsString();
       final decoded = jsonDecode(content);
-      if (decoded is! Map<String, Object?>) {
+      if (decoded is! Map) {
         return null;
       }
-      return _stateFromJson(decoded);
+      return _stateFromJson(Map<String, Object?>.from(decoded));
     } catch (_) {
       return null;
     }
@@ -63,6 +63,8 @@ Map<String, Object?> _stateToJson(FocusState state) {
     'commonDurations': state.commonDurations,
     'elapsedSeconds': state.elapsed.inSeconds,
     'currentSessionStartedAt': state.currentSessionStartedAt?.toIso8601String(),
+    'currentTaskId': state.currentTaskId,
+    'currentTaskTitle': state.currentTaskTitle,
     'sessions': state.sessions.map(_sessionToJson).toList(growable: false),
   };
 }
@@ -78,6 +80,8 @@ FocusState _stateFromJson(Map<String, Object?> json) {
   final rawCountdown = json['countdownMinutes'];
   final rawElapsedSeconds = json['elapsedSeconds'];
   final rawStartedAt = json['currentSessionStartedAt'];
+  final rawCurrentTaskId = json['currentTaskId'];
+  final rawCurrentTaskTitle = json['currentTaskTitle'];
 
   final mode = FocusTimerMode.values.firstWhere(
     (item) => item.name == modeName,
@@ -111,6 +115,13 @@ FocusState _stateFromJson(Map<String, Object?> json) {
     commonDurations: commonDurations,
     elapsed: Duration(seconds: elapsedSeconds),
     currentSessionStartedAt: currentSessionStartedAt,
+    currentTaskId: rawCurrentTaskId is String && rawCurrentTaskId.isNotEmpty
+        ? rawCurrentTaskId
+        : null,
+    currentTaskTitle:
+        rawCurrentTaskTitle is String && rawCurrentTaskTitle.isNotEmpty
+        ? rawCurrentTaskTitle
+        : null,
     sessions: sessions,
     completionSignal: 0,
   );
@@ -124,6 +135,8 @@ Map<String, Object?> _sessionToJson(FocusSessionRecord item) {
     'durationSeconds': item.duration.inSeconds,
     'mode': item.mode.name,
     'completed': item.completed,
+    'taskId': item.taskId,
+    'taskTitleSnapshot': item.taskTitleSnapshot,
   };
 }
 
@@ -139,6 +152,8 @@ FocusSessionRecord? _sessionFromJson(Object? raw) {
   final durationRaw = raw['durationSeconds'];
   final modeRaw = raw['mode'];
   final completedRaw = raw['completed'];
+  final taskIdRaw = raw['taskId'];
+  final taskTitleRaw = raw['taskTitleSnapshot'];
 
   if (startAtRaw is! String ||
       endAtRaw is! String ||
@@ -161,6 +176,9 @@ FocusSessionRecord? _sessionFromJson(Object? raw) {
     duration: Duration(seconds: durationRaw),
     mode: mode,
     completed: completedRaw == true,
+    taskId: taskIdRaw is String && taskIdRaw.isNotEmpty ? taskIdRaw : null,
+    taskTitleSnapshot:
+        taskTitleRaw is String && taskTitleRaw.isNotEmpty ? taskTitleRaw : null,
   );
 }
 

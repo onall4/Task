@@ -409,6 +409,96 @@ class AppStrings {
   /// 标签字段标题。
   String get taskLabel => isChinese ? '标签' : 'Label';
 
+  String get taskDate => isChinese ? '任务日期' : 'Task date';
+
+  String get startTime => isChinese ? '开始时间' : 'Start time';
+
+  String get endTime => isChinese ? '结束时间' : 'End time';
+
+  String get noStartTime => isChinese ? '暂不设置开始时间' : 'No start time';
+
+  String get noEndTime => isChinese ? '暂不设置结束时间' : 'No end time';
+
+  String get priority => isChinese ? '优先级' : 'Priority';
+
+  String get priorityLow => isChinese ? '低优先级' : 'Low';
+
+  String get priorityMedium => isChinese ? '中优先级' : 'Medium';
+
+  String get priorityHigh => isChinese ? '高优先级' : 'High';
+
+  String priorityName(int priority) {
+    return switch (priority) {
+      1 => priorityHigh,
+      2 => priorityMedium,
+      _ => priorityLow,
+    };
+  }
+
+  String get repeatRule => isChinese ? '重复' : 'Repeat';
+
+  String get repeatNone => isChinese ? '不重复' : 'No repeat';
+
+  String get repeatDaily => isChinese ? '每天' : 'Daily';
+
+  String get repeatWeekly => isChinese ? '每周' : 'Weekly';
+
+  String get repeatMonthly => isChinese ? '每月' : 'Monthly';
+
+  String get timeRangeInvalid =>
+      isChinese ? '结束时间不能早于开始时间' : 'End time cannot be before start time';
+
+  String get searchTasks => isChinese ? '搜索任务' : 'Search tasks';
+
+  String get filterTasks => isChinese ? '筛选任务' : 'Filter tasks';
+
+  String get allTasks => isChinese ? '全部任务' : 'All tasks';
+
+  String get activeOnly => isChinese ? '仅进行中' : 'Active only';
+
+  String get completedOnly => isChinese ? '仅已完成' : 'Completed only';
+
+  String get allPriorities => isChinese ? '全部优先级' : 'All priorities';
+
+  String get currentFocusTask => isChinese ? '当前专注任务' : 'Current focus task';
+
+  String get noFocusTask => isChinese ? '未绑定任务' : 'No linked task';
+
+  String get chooseFocusTask => isChinese ? '选择专注任务' : 'Choose focus task';
+
+  String get habitsEmptyTitle => isChinese ? '还没有习惯' : 'No habits yet';
+
+  String get habitsEmptyBody =>
+      isChinese ? '添加一个每天想坚持的小习惯。' : 'Add a small habit you want to keep daily.';
+
+  String get addHabit => isChinese ? '添加习惯' : 'Add habit';
+
+  String get habitTitle => isChinese ? '习惯名称' : 'Habit name';
+
+  String get habitRequired => isChinese ? '习惯名称不能为空' : 'Habit name is required';
+
+  String get checkedIn => isChinese ? '已打卡' : 'Checked in';
+
+  String get notCheckedIn => isChinese ? '未打卡' : 'Not checked in';
+
+  String get weekSummary => isChinese ? '本周' : 'This week';
+
+  String get monthSummary => isChinese ? '本月' : 'This month';
+
+  String get taskStats => isChinese ? '任务统计' : 'Task stats';
+
+  String get totalTasks => isChinese ? '任务总数' : 'Total tasks';
+
+  String get taskCompletionRate => isChinese ? '任务完成率' : 'Task completion';
+
+  String get linkedFocusSessions => isChinese ? '已绑定专注' : 'Linked focus';
+
+  String get topFocusTask => isChinese ? '最长专注任务' : 'Top focus task';
+
+  String get categoryDistribution => isChinese ? '分类分布' : 'Category distribution';
+
+  String get priorityDistribution => isChinese ? '优先级分布' : 'Priority distribution';
+
   /// 倒计时模式名称。
   String get countdownMode => isChinese ? '倒计时' : 'Countdown';
 

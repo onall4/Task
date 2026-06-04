@@ -57,12 +57,25 @@ class _HomePageState extends ConsumerState<HomePage> {
   final _dragCompletingTaskIds = <String>{};
   final _dragCompletedAtByTaskId = <String, DateTime>{};
   final _sectionMoves = <String, _TaskSectionMove>{};
+  late final TextEditingController _searchController;
   bool? _activeSectionAnimatingToCollapsed;
   String? _pressedTaskId;
   Offset? _pressStartPosition;
   String? _reorderTaskId;
   var _longPressMoved = false;
   var _reorderInProgress = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _searchController = TextEditingController();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
 
   @override
   /// 构建首页列表。
@@ -73,17 +86,37 @@ class _HomePageState extends ConsumerState<HomePage> {
     final isSelectionMode = ref.watch(taskSelectionModeProvider);
     final selectedIds = ref.watch(selectedTaskIdsProvider);
     final selectedLabel = ref.watch(selectedTaskLabelProvider);
+    final schedules = ref.watch(taskScheduleControllerProvider);
+    final searchQuery = ref.watch(taskSearchQueryProvider);
+    final priorityFilter = ref.watch(taskPriorityFilterProvider);
+    final statusFilter = ref.watch(taskStatusFilterProvider);
     final strings = ref.watch(appStringsProvider);
 
     return tasksAsync.when(
       data: (tasks) {
-        final scopedTasks = selectedLabel == null
-            ? tasks
-            : tasks.where((task) => task.label == selectedLabel).toList();
+        _syncSearchController(searchQuery);
+        final today = taskDateOnly(DateTime.now());
+        final scopedTasks = tasks
+            .where((task) => _matchesHomeScope(task, schedules, today))
+            .where((task) => _matchesHomeFilters(
+                  task,
+                  selectedLabel,
+                  searchQuery,
+                  priorityFilter,
+                  statusFilter,
+                ))
+            .toList(growable: false);
         final scopedMoves = _sectionMoves.values
             .where(
               (move) =>
-                  selectedLabel == null || move.task.label == selectedLabel,
+                  _matchesHomeScope(move.task, schedules, today) &&
+                  _matchesHomeFilters(
+                    move.task,
+                    selectedLabel,
+                    searchQuery,
+                    priorityFilter,
+                    statusFilter,
+                  ),
             )
             .toList(growable: false);
         final activeTasks = _buildActiveTasks(scopedTasks, scopedMoves);
@@ -201,11 +234,31 @@ class _HomePageState extends ConsumerState<HomePage> {
                 });
               }
             },
-            header: _buildActiveDivider(
-              ref,
-              activeTasks,
-              activeCollapsed,
-              strings,
+            header: Column(
+              children: [
+                _HomeSearchAndFilterBar(
+                  searchController: _searchController,
+                  strings: strings,
+                  searchQuery: searchQuery,
+                  priorityFilter: priorityFilter,
+                  statusFilter: statusFilter,
+                  onSearchChanged: (value) {
+                    ref.read(taskSearchQueryProvider.notifier).state = value;
+                  },
+                  onPriorityFilterChanged: (value) {
+                    ref.read(taskPriorityFilterProvider.notifier).state = value;
+                  },
+                  onStatusFilterChanged: (value) {
+                    ref.read(taskStatusFilterProvider.notifier).state = value;
+                  },
+                ),
+                _buildActiveDivider(
+                  ref,
+                  activeTasks,
+                  activeCollapsed,
+                  strings,
+                ),
+              ],
             ),
             footer: _buildCompletedTasksFooter(
               ref,
@@ -337,6 +390,61 @@ class _HomePageState extends ConsumerState<HomePage> {
   }
 
   /// 切换单个任务的多选状态。
+  void _syncSearchController(String query) {
+    if (_searchController.text == query) {
+      return;
+    }
+    _searchController.value = TextEditingValue(
+      text: query,
+      selection: TextSelection.collapsed(offset: query.length),
+    );
+  }
+
+  bool _matchesHomeScope(
+    Task task,
+    Map<String, TaskScheduleMetadata> schedules,
+    DateTime today,
+  ) {
+    final schedule = effectiveTaskSchedule(task, schedules);
+    if (task.status == TaskStatus.completed.value) {
+      final completedAt = task.completedAt;
+      return completedAt != null && isSameTaskDate(completedAt, today);
+    }
+    if (schedule.scheduledDate == null && task.dueAt == null) {
+      return true;
+    }
+    return taskOccursOnDate(task, schedule, today);
+  }
+
+  bool _matchesHomeFilters(
+    Task task,
+    String? selectedLabel,
+    String searchQuery,
+    int? priorityFilter,
+    TaskStatusFilter statusFilter,
+  ) {
+    if (selectedLabel != null && task.label != selectedLabel) {
+      return false;
+    }
+    if (priorityFilter != null && task.priority != priorityFilter) {
+      return false;
+    }
+    final completed = task.status == TaskStatus.completed.value;
+    if (statusFilter == TaskStatusFilter.active && completed) {
+      return false;
+    }
+    if (statusFilter == TaskStatusFilter.completed && !completed) {
+      return false;
+    }
+    final query = searchQuery.trim().toLowerCase();
+    if (query.isEmpty) {
+      return true;
+    }
+    final description = task.description ?? '';
+    return task.title.toLowerCase().contains(query) ||
+        description.toLowerCase().contains(query);
+  }
+
   void _toggleSelection(WidgetRef ref, String taskId) {
     final current = ref.read(selectedTaskIdsProvider);
     final updated = <String>{...current};
@@ -1109,10 +1217,14 @@ class _HomePageState extends ConsumerState<HomePage> {
   }
 
   void _openTaskEditor(BuildContext context, Task task) {
+    final schedules = ref.read(taskScheduleControllerProvider);
     Navigator.of(context).push(
       buildTaskEditorRoute(
         taskId: task.id,
-        initialValue: TaskEditorValue.fromTask(task),
+        initialValue: TaskEditorValue.fromTask(
+          task,
+          schedule: effectiveTaskSchedule(task, schedules),
+        ),
       ),
     );
   }
@@ -1211,6 +1323,207 @@ class _OverlayRectClipper extends CustomClipper<Rect> {
   bool shouldReclip(covariant _OverlayRectClipper oldClipper) {
     return oldClipper.rect != rect;
   }
+}
+
+class _HomeSearchAndFilterBar extends StatelessWidget {
+  const _HomeSearchAndFilterBar({
+    required this.searchController,
+    required this.strings,
+    required this.searchQuery,
+    required this.priorityFilter,
+    required this.statusFilter,
+    required this.onSearchChanged,
+    required this.onPriorityFilterChanged,
+    required this.onStatusFilterChanged,
+  });
+
+  final TextEditingController searchController;
+  final AppStrings strings;
+  final String searchQuery;
+  final int? priorityFilter;
+  final TaskStatusFilter statusFilter;
+  final ValueChanged<String> onSearchChanged;
+  final ValueChanged<int?> onPriorityFilterChanged;
+  final ValueChanged<TaskStatusFilter> onStatusFilterChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final darkMode = theme.brightness == Brightness.dark;
+    final background = darkMode
+        ? const Color(0xFF202822).withValues(alpha: 0.94)
+        : Colors.white.withValues(alpha: 0.92);
+    final borderColor = darkMode
+        ? const Color(0xFF354239)
+        : const Color(0xFFE8DED0);
+    final foreground = theme.textTheme.bodyMedium?.color;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Row(
+        children: [
+          Expanded(
+            child: Container(
+              height: 46,
+              decoration: BoxDecoration(
+                color: background,
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(color: borderColor),
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Row(
+                children: [
+                  Icon(Icons.search_rounded, size: 20, color: foreground),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: TextField(
+                      controller: searchController,
+                      onChanged: onSearchChanged,
+                      decoration: InputDecoration(
+                        hintText: strings.searchTasks,
+                        border: InputBorder.none,
+                        isDense: true,
+                      ),
+                    ),
+                  ),
+                  if (searchQuery.isNotEmpty)
+                    IconButton(
+                      visualDensity: VisualDensity.compact,
+                      onPressed: () => onSearchChanged(''),
+                      icon: const Icon(Icons.close_rounded, size: 18),
+                    ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          _HomeFilterMenuButton(
+            strings: strings,
+            priorityFilter: priorityFilter,
+            statusFilter: statusFilter,
+            onPriorityFilterChanged: onPriorityFilterChanged,
+            onStatusFilterChanged: onStatusFilterChanged,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _HomeFilterMenuButton extends StatelessWidget {
+  const _HomeFilterMenuButton({
+    required this.strings,
+    required this.priorityFilter,
+    required this.statusFilter,
+    required this.onPriorityFilterChanged,
+    required this.onStatusFilterChanged,
+  });
+
+  final AppStrings strings;
+  final int? priorityFilter;
+  final TaskStatusFilter statusFilter;
+  final ValueChanged<int?> onPriorityFilterChanged;
+  final ValueChanged<TaskStatusFilter> onStatusFilterChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return PopupMenuButton<_HomeFilterAction>(
+      tooltip: strings.filterTasks,
+      onSelected: (action) {
+        switch (action) {
+          case _HomeFilterAction.statusAll:
+            onStatusFilterChanged(TaskStatusFilter.all);
+          case _HomeFilterAction.statusActive:
+            onStatusFilterChanged(TaskStatusFilter.active);
+          case _HomeFilterAction.statusCompleted:
+            onStatusFilterChanged(TaskStatusFilter.completed);
+          case _HomeFilterAction.priorityAll:
+            onPriorityFilterChanged(null);
+          case _HomeFilterAction.priorityHigh:
+            onPriorityFilterChanged(1);
+          case _HomeFilterAction.priorityMedium:
+            onPriorityFilterChanged(2);
+          case _HomeFilterAction.priorityLow:
+            onPriorityFilterChanged(3);
+        }
+      },
+      itemBuilder: (context) => [
+        _filterItem(
+          _HomeFilterAction.statusAll,
+          strings.allTasks,
+          statusFilter == TaskStatusFilter.all,
+        ),
+        _filterItem(
+          _HomeFilterAction.statusActive,
+          strings.activeOnly,
+          statusFilter == TaskStatusFilter.active,
+        ),
+        _filterItem(
+          _HomeFilterAction.statusCompleted,
+          strings.completedOnly,
+          statusFilter == TaskStatusFilter.completed,
+        ),
+        const PopupMenuDivider(),
+        _filterItem(
+          _HomeFilterAction.priorityAll,
+          strings.allPriorities,
+          priorityFilter == null,
+        ),
+        _filterItem(
+          _HomeFilterAction.priorityHigh,
+          strings.priorityHigh,
+          priorityFilter == 1,
+        ),
+        _filterItem(
+          _HomeFilterAction.priorityMedium,
+          strings.priorityMedium,
+          priorityFilter == 2,
+        ),
+        _filterItem(
+          _HomeFilterAction.priorityLow,
+          strings.priorityLow,
+          priorityFilter == 3,
+        ),
+      ],
+      child: SizedBox(
+        width: 46,
+        height: 46,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(18),
+            color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.7),
+          ),
+          child: const Icon(Icons.tune_rounded),
+        ),
+      ),
+    );
+  }
+
+  PopupMenuItem<_HomeFilterAction> _filterItem(
+    _HomeFilterAction action,
+    String title,
+    bool selected,
+  ) {
+    return PopupMenuItem(
+      value: action,
+      child: Row(
+        children: [
+          Expanded(child: Text(title)),
+          if (selected) const Icon(Icons.check_rounded, size: 18),
+        ],
+      ),
+    );
+  }
+}
+
+enum _HomeFilterAction {
+  statusAll,
+  statusActive,
+  statusCompleted,
+  priorityAll,
+  priorityHigh,
+  priorityMedium,
+  priorityLow,
 }
 
 class _SectionLabel extends StatelessWidget {

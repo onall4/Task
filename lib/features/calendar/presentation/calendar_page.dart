@@ -10,6 +10,7 @@ import '../../tasks/presentation/task_editor_page.dart';
 import '../../tasks/presentation/widgets/task_card.dart';
 import '../../tasks/presentation/widgets/task_details_sheet.dart';
 import '../data/calendar_controller.dart';
+import '../data/habit_controller.dart';
 
 final calendarSubPageIndexProvider = StateProvider<int>((ref) => 0);
 
@@ -140,19 +141,20 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
         final dragMax = state.isExpanded
             ? 0.0
             : (expandedHeight - collapsedHeight);
-        final effectiveDrag = _dragPixels.clamp(dragMin, dragMax);
+        final effectiveDrag = _dragPixels.clamp(dragMin, dragMax).toDouble();
         final baseHeight = state.isExpanded ? expandedHeight : collapsedHeight;
         final viewportHeight = (baseHeight + effectiveDrag).clamp(
           collapsedHeight,
           expandedHeight,
-        );
+        ).toDouble();
         final expandProgress =
             ((viewportHeight - collapsedHeight) /
                     (expandedHeight - collapsedHeight).clamp(
                       1,
                       double.infinity,
                     ))
-                .clamp(0.0, 1.0);
+                .clamp(0.0, 1.0)
+                .toDouble();
         final collapsedOffset = weekRowIndex * _calendarRowHeight;
         final topOffset = collapsedOffset * (1 - expandProgress);
 
@@ -319,7 +321,7 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
                 },
                 children: [
                   _CalendarTodoTab(selectedDate: state.selectedDate),
-                  const _CalendarHabitTab(),
+                  _CalendarHabitTab(selectedDate: state.selectedDate),
                 ],
               ),
             ),
@@ -347,6 +349,7 @@ class _CalendarTodoTabState extends ConsumerState<_CalendarTodoTab> {
   @override
   Widget build(BuildContext context) {
     final tasksAsync = ref.watch(taskListProvider);
+    final schedules = ref.watch(taskScheduleControllerProvider);
     final strings = ref.watch(appStringsProvider);
 
     return tasksAsync.when(
@@ -360,27 +363,73 @@ class _CalendarTodoTabState extends ConsumerState<_CalendarTodoTab> {
                 .where(
                   (task) =>
                       task.status == TaskStatus.active.value &&
-                      task.dueAt != null &&
-                      _isSameDate(task.dueAt!, widget.selectedDate),
+                      taskOccursOnDate(
+                        task,
+                        effectiveTaskSchedule(task, schedules),
+                        widget.selectedDate,
+                      ),
                 )
                 .toList()
-              ..sort(_compareCalendarTasks);
+              ..sort((left, right) => _compareCalendarTasks(
+                    left,
+                    right,
+                    schedules,
+                  ));
         _syncCompletingTaskIds(activeTaskIds);
+        final weekCount = _taskCountInRange(
+          tasks,
+          schedules,
+          _startOfWeek(widget.selectedDate),
+          _startOfWeek(widget.selectedDate).add(const Duration(days: 6)),
+        );
+        final monthStart = DateTime(
+          widget.selectedDate.year,
+          widget.selectedDate.month,
+        );
+        final monthEnd = DateTime(
+          widget.selectedDate.year,
+          widget.selectedDate.month + 1,
+          0,
+        );
+        final monthCount = _taskCountInRange(
+          tasks,
+          schedules,
+          monthStart,
+          monthEnd,
+        );
 
         if (dayTasks.isEmpty) {
-          return _CalendarEmptyState(
-            icon: Icons.event_available_rounded,
-            title: strings.calendarNoTodoTitle,
-            body: strings.calendarNoTodoBody,
+          return Column(
+            children: [
+              _CalendarTaskSummary(
+                strings: strings,
+                weekCount: weekCount,
+                monthCount: monthCount,
+              ),
+              Expanded(
+                child: _CalendarEmptyState(
+                  icon: Icons.event_available_rounded,
+                  title: strings.calendarNoTodoTitle,
+                  body: strings.calendarNoTodoBody,
+                ),
+              ),
+            ],
           );
         }
 
         return ListView.builder(
           padding: const EdgeInsets.fromLTRB(16, 10, 16, 24),
-          itemCount: dayTasks.length,
+          itemCount: dayTasks.length + 1,
           itemBuilder: (context, index) {
-            final task = dayTasks[index];
-            final isLast = index == dayTasks.length - 1;
+            if (index == 0) {
+              return _CalendarTaskSummary(
+                strings: strings,
+                weekCount: weekCount,
+                monthCount: monthCount,
+              );
+            }
+            final task = dayTasks[index - 1];
+            final isLast = index == dayTasks.length;
             final completing = _completingTaskIds.contains(task.id);
             return _CalendarCompletingTaskItem(
               key: ValueKey('calendar-task-${task.id}'),
@@ -392,7 +441,7 @@ class _CalendarTodoTabState extends ConsumerState<_CalendarTodoTab> {
                   task: task,
                   strings: strings,
                   completionPreviewCompleted: completing ? true : null,
-                  completionStrikeProgress: completing ? 1 : null,
+                  completionStrikeProgress: completing ? 1.0 : null,
                   onTap: () {
                     showTaskDetailsSheet(
                       context: context,
@@ -404,7 +453,10 @@ class _CalendarTodoTabState extends ConsumerState<_CalendarTodoTab> {
                     Navigator.of(context).push(
                       buildTaskEditorRoute(
                         taskId: task.id,
-                        initialValue: TaskEditorValue.fromTask(task),
+                        initialValue: TaskEditorValue.fromTask(
+                          task,
+                          schedule: effectiveTaskSchedule(task, schedules),
+                        ),
                       ),
                     );
                   },
@@ -489,7 +541,9 @@ class _CalendarCompletingTaskItem extends StatelessWidget {
       tween: Tween<double>(end: completing ? 1 : 0),
       builder: (context, progress, child) {
         final opacity = (1 - (progress / 0.58)).clamp(0.0, 1.0).toDouble();
-        final collapseProgress = ((progress - 0.42) / 0.58).clamp(0.0, 1.0);
+        final collapseProgress = ((progress - 0.42) / 0.58)
+            .clamp(0.0, 1.0)
+            .toDouble();
         final heightFactor = (1 - collapseProgress).clamp(0.0, 1.0).toDouble();
 
         return ClipRect(
@@ -505,12 +559,156 @@ class _CalendarCompletingTaskItem extends StatelessWidget {
   }
 }
 
-class _CalendarHabitTab extends StatelessWidget {
-  const _CalendarHabitTab();
+class _CalendarHabitTab extends ConsumerWidget {
+  const _CalendarHabitTab({required this.selectedDate});
+
+  final DateTime selectedDate;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final strings = ref.watch(appStringsProvider);
+    final habits = ref.watch(habitControllerProvider);
+
+    if (habits.isEmpty) {
+      return Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+            child: _CalendarAddHabitButton(strings: strings, onTap: () {
+              _showHabitEditor(context, ref, strings);
+            }),
+          ),
+          Expanded(
+            child: _CalendarEmptyState(
+              icon: Icons.check_circle_outline_rounded,
+              title: strings.habitsEmptyTitle,
+              body: strings.habitsEmptyBody,
+            ),
+          ),
+        ],
+      );
+    }
+
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 24),
+      itemCount: habits.length + 1,
+      itemBuilder: (context, index) {
+        if (index == 0) {
+          return _CalendarAddHabitButton(
+            strings: strings,
+            onTap: () => _showHabitEditor(context, ref, strings),
+          );
+        }
+        final habit = habits[index - 1];
+        return Padding(
+          padding: EdgeInsets.only(bottom: index == habits.length ? 0 : 6),
+          child: _HabitCard(
+            habit: habit,
+            checked: habit.isCheckedOn(selectedDate),
+            strings: strings,
+            onToggle: () {
+              ref
+                  .read(habitControllerProvider.notifier)
+                  .toggleCheck(habit.id, selectedDate);
+            },
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _CalendarAddHabitButton extends StatelessWidget {
+  const _CalendarAddHabitButton({required this.strings, required this.onTap});
+
+  final AppStrings strings;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    return const SizedBox.expand();
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: OutlinedButton.icon(
+        onPressed: onTap,
+        icon: const Icon(Icons.add_rounded),
+        label: Text(strings.addHabit),
+      ),
+    );
+  }
+}
+
+class _HabitCard extends StatelessWidget {
+  const _HabitCard({
+    required this.habit,
+    required this.checked,
+    required this.strings,
+    required this.onToggle,
+  });
+
+  final HabitEntry habit;
+  final bool checked;
+  final AppStrings strings;
+  final VoidCallback onToggle;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final darkMode = theme.brightness == Brightness.dark;
+    final selectedTone = darkMode
+        ? const Color(0xFFA8D4C5)
+        : const Color(0xFF33544B);
+    return SizedBox(
+      height: TaskCard.height,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(20),
+          onTap: onToggle,
+          child: Ink(
+            padding: const EdgeInsets.fromLTRB(12, 0, 14, 0),
+            decoration: BoxDecoration(
+              color: darkMode
+                  ? const Color(0xFF202822).withValues(alpha: 0.96)
+                  : Colors.white.withValues(alpha: 0.92),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: darkMode
+                    ? const Color(0xFF354239)
+                    : const Color(0xFFE8DED0),
+              ),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  checked
+                      ? Icons.check_circle_rounded
+                      : Icons.radio_button_unchecked_rounded,
+                  color: checked ? selectedTone : theme.iconTheme.color,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    habit.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                Text(
+                  checked ? strings.checkedIn : strings.notCheckedIn,
+                  style: theme.textTheme.labelLarge?.copyWith(
+                    color: checked ? selectedTone : theme.hintColor,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
 
@@ -559,6 +757,125 @@ class _CalendarEmptyState extends StatelessWidget {
       ),
     );
   }
+}
+
+class _CalendarTaskSummary extends StatelessWidget {
+  const _CalendarTaskSummary({
+    required this.strings,
+    required this.weekCount,
+    required this.monthCount,
+  });
+
+  final AppStrings strings;
+  final int weekCount;
+  final int monthCount;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+      child: Row(
+        children: [
+          Expanded(
+            child: _SummaryPill(
+              label: strings.weekSummary,
+              value: strings.itemCount(weekCount),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: _SummaryPill(
+              label: strings.monthSummary,
+              value: strings.itemCount(monthCount),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SummaryPill extends StatelessWidget {
+  const _SummaryPill({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface.withValues(alpha: 0.72),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Row(
+        children: [
+          Text(label, style: theme.textTheme.labelLarge),
+          const Spacer(),
+          Text(
+            value,
+            style: theme.textTheme.labelLarge?.copyWith(
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+Future<void> _showHabitEditor(
+  BuildContext context,
+  WidgetRef ref,
+  AppStrings strings,
+) async {
+  final controller = TextEditingController();
+  String? errorText;
+  final created = await showDialog<String>(
+    context: context,
+    builder: (context) {
+      return StatefulBuilder(
+        builder: (context, setDialogState) {
+          return AlertDialog(
+            title: Text(strings.addHabit),
+            content: TextField(
+              controller: controller,
+              autofocus: true,
+              maxLength: 30,
+              decoration: InputDecoration(
+                labelText: strings.habitTitle,
+                errorText: errorText,
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: Text(strings.cancel),
+              ),
+              FilledButton(
+                onPressed: () {
+                  final value = controller.text.trim();
+                  if (value.isEmpty) {
+                    setDialogState(() => errorText = strings.habitRequired);
+                    return;
+                  }
+                  Navigator.of(context).pop(value);
+                },
+                child: Text(strings.save),
+              ),
+            ],
+          );
+        },
+      );
+    },
+  );
+  controller.dispose();
+  if (created == null) {
+    return;
+  }
+  await ref.read(habitControllerProvider.notifier).createHabit(title: created);
 }
 
 class _WeekdayHeaderRow extends StatelessWidget {
@@ -811,9 +1128,15 @@ bool _isSameDate(DateTime left, DateTime right) {
       left.day == right.day;
 }
 
-int _compareCalendarTasks(Task left, Task right) {
-  final leftDueAt = left.dueAt;
-  final rightDueAt = right.dueAt;
+int _compareCalendarTasks(
+  Task left,
+  Task right,
+  Map<String, TaskScheduleMetadata> schedules,
+) {
+  final leftSchedule = effectiveTaskSchedule(left, schedules);
+  final rightSchedule = effectiveTaskSchedule(right, schedules);
+  final leftDueAt = leftSchedule.sortAt ?? left.dueAt;
+  final rightDueAt = rightSchedule.sortAt ?? right.dueAt;
   if (leftDueAt != null && rightDueAt != null) {
     final dueComparison = leftDueAt.compareTo(rightDueAt);
     if (dueComparison != 0) {
@@ -825,6 +1148,31 @@ int _compareCalendarTasks(Task left, Task right) {
     return orderComparison;
   }
   return right.updatedAt.compareTo(left.updatedAt);
+}
+
+int _taskCountInRange(
+  List<Task> tasks,
+  Map<String, TaskScheduleMetadata> schedules,
+  DateTime start,
+  DateTime end,
+) {
+  var count = 0;
+  var cursor = DateTime(start.year, start.month, start.day);
+  final endDate = DateTime(end.year, end.month, end.day);
+  while (!cursor.isAfter(endDate)) {
+    count += tasks.where((task) {
+      if (task.status != TaskStatus.active.value) {
+        return false;
+      }
+      return taskOccursOnDate(
+        task,
+        effectiveTaskSchedule(task, schedules),
+        cursor,
+      );
+    }).length;
+    cursor = cursor.add(const Duration(days: 1));
+  }
+  return count;
 }
 
 Set<int> _headerMonthKeys(DateTime visibleWeekStart) {

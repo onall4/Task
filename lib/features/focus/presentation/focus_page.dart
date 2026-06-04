@@ -22,6 +22,7 @@ import 'package:intl/intl.dart';
 import '../../../app/preferences/app_preferences.dart';
 import '../../../app/widgets/app_notice.dart';
 import '../../../app/widgets/wheel_picker.dart';
+import '../../tasks/data/task_repository.dart';
 import '../data/focus_controller.dart';
 
 /// 专注页子页面索引。
@@ -108,6 +109,16 @@ class _PomodoroTab extends ConsumerWidget {
     final strings = ref.watch(appStringsProvider);
     final state = ref.watch(focusControllerProvider);
     final controller = ref.read(focusControllerProvider.notifier);
+    final tasks = ref.watch(taskListProvider).maybeWhen(
+          data: (items) => items,
+          orElse: () => const <Task>[],
+        );
+    final activeTasks = tasks
+        .where((task) => task.status == TaskStatus.active.value)
+        .toList(growable: false);
+    final selectedTask = _taskById(tasks, state.currentTaskId);
+    final selectedTaskTitle =
+        selectedTask?.title ?? state.currentTaskTitle ?? strings.noFocusTask;
     final timerDisplay = _formatTimer(
       state.mode == FocusTimerMode.countdown ? state.remaining : state.elapsed,
       showHourAlways: state.mode == FocusTimerMode.countup,
@@ -137,7 +148,7 @@ class _PomodoroTab extends ConsumerWidget {
           final dialSize = min(
             320.0,
             min(maxDialWidth, maxDialHeight),
-          ).clamp(180.0, 320.0);
+          ).clamp(180.0, 320.0).toDouble();
 
           final modeSwitcher = SegmentedButton<FocusTimerMode>(
             segments: [
@@ -155,6 +166,18 @@ class _PomodoroTab extends ConsumerWidget {
               final selectedMode = selection.first;
               controller.setMode(selectedMode);
             },
+          );
+          final taskSelector = _FocusTaskSelector(
+            label: strings.currentFocusTask,
+            title: selectedTaskTitle,
+            isBound: state.currentTaskId != null,
+            onTap: () => _showFocusTaskPicker(
+              context: context,
+              ref: ref,
+              tasks: activeTasks,
+              strings: strings,
+              selectedTaskId: state.currentTaskId,
+            ),
           );
           final dial = Center(
             child: _PomodoroDial(
@@ -220,6 +243,8 @@ class _PomodoroTab extends ConsumerWidget {
                   children: [
                     // 1) 顶部模式切换：倒计时 / 正计时。
                     modeSwitcher,
+                    const SizedBox(height: 10),
+                    taskSelector,
                     const SizedBox(height: 12),
                     // 2) 中央圆盘：显示当前计时与进度。
                     dial,
@@ -237,6 +262,8 @@ class _PomodoroTab extends ConsumerWidget {
             children: [
               // 竖屏布局同样保持“模式 -> 圆盘 -> 操作”的阅读顺序。
               modeSwitcher,
+              const SizedBox(height: 10),
+              taskSelector,
               const SizedBox(height: 14),
               Expanded(child: dial),
               const SizedBox(height: 16),
@@ -378,6 +405,155 @@ class _PomodoroTab extends ConsumerWidget {
 /// - 14 天曲线图卡
 /// - 12 周热力图卡
 /// - 时段分布卡
+class _FocusTaskSelector extends StatelessWidget {
+  const _FocusTaskSelector({
+    required this.label,
+    required this.title,
+    required this.isBound,
+    required this.onTap,
+  });
+
+  final String label;
+  final String title;
+  final bool isBound;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final darkMode = theme.brightness == Brightness.dark;
+    final borderColor = darkMode
+        ? const Color(0xFF385047)
+        : const Color(0xFFD8CDBF);
+    final iconColor = darkMode
+        ? const Color(0xFFA8D4C5)
+        : const Color(0xFF33544B);
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(18),
+        onTap: onTap,
+        child: Ink(
+          padding: const EdgeInsets.fromLTRB(14, 10, 12, 10),
+          decoration: BoxDecoration(
+            color: darkMode
+                ? const Color(0xFF202822).withValues(alpha: 0.88)
+                : Colors.white.withValues(alpha: 0.82),
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: borderColor),
+          ),
+          child: Row(
+            children: [
+              Icon(
+                isBound ? Icons.link_rounded : Icons.link_off_rounded,
+                size: 20,
+                color: iconColor,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(label, style: theme.textTheme.labelSmall),
+                    const SizedBox(height: 2),
+                    Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Icon(Icons.keyboard_arrow_down_rounded, color: iconColor),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+Future<void> _showFocusTaskPicker({
+  required BuildContext context,
+  required WidgetRef ref,
+  required List<Task> tasks,
+  required AppStrings strings,
+  required String? selectedTaskId,
+}) async {
+  final controller = ref.read(focusControllerProvider.notifier);
+  await showModalBottomSheet<void>(
+    context: context,
+    showDragHandle: true,
+    builder: (context) {
+      return SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          padding: const EdgeInsets.fromLTRB(12, 4, 12, 18),
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(4, 0, 4, 8),
+              child: Text(
+                strings.chooseFocusTask,
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.link_off_rounded),
+              title: Text(strings.noFocusTask),
+              selected: selectedTaskId == null,
+              onTap: () {
+                controller.setCurrentTask();
+                Navigator.of(context).pop();
+              },
+            ),
+            for (final task in tasks)
+              ListTile(
+                leading: Icon(
+                  task.id == selectedTaskId
+                      ? Icons.check_circle_rounded
+                      : Icons.radio_button_unchecked_rounded,
+                ),
+                title: Text(
+                  task.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                subtitle: task.label == null
+                    ? null
+                    : Text(strings.taskLabelName(task.label!)),
+                selected: task.id == selectedTaskId,
+                onTap: () {
+                  controller.setCurrentTask(taskId: task.id, title: task.title);
+                  Navigator.of(context).pop();
+                },
+              ),
+          ],
+        ),
+      );
+    },
+  );
+}
+
+Task? _taskById(List<Task> tasks, String? taskId) {
+  if (taskId == null) {
+    return null;
+  }
+  for (final task in tasks) {
+    if (task.id == taskId) {
+      return task;
+    }
+  }
+  return null;
+}
+
 class _StatisticsTab extends ConsumerWidget {
   const _StatisticsTab();
 
@@ -388,10 +564,17 @@ class _StatisticsTab extends ConsumerWidget {
       focusControllerProvider.select((state) => state.sessions),
     );
     final stats = _FocusStatsData.fromSessions(sessions);
+    final tasks = ref.watch(taskListProvider).maybeWhen(
+          data: (items) => items,
+          orElse: () => const <Task>[],
+        );
+    final taskStats = _TaskStatsData.fromTasks(tasks, sessions);
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
       children: [
+        _TaskStatsCard(strings: strings, stats: taskStats),
+        const SizedBox(height: 12),
         // 无数据时显示空状态卡片。
         if (sessions.isEmpty)
           Card(
@@ -638,7 +821,10 @@ class _PomodoroDial extends StatelessWidget {
               TweenAnimationBuilder<double>(
                 duration: const Duration(milliseconds: 420),
                 curve: Curves.easeOutCubic,
-                tween: Tween<double>(begin: 0, end: progress.clamp(0, 1)),
+                tween: Tween<double>(
+                  begin: 0,
+                  end: progress.clamp(0.0, 1.0).toDouble(),
+                ),
                 builder: (context, animatedProgress, child) {
                   return CustomPaint(
                     size: Size.square(dialSize * 0.84),
@@ -897,6 +1083,28 @@ class _PureFocusPageState extends ConsumerState<_PureFocusPage> {
                   ),
                 ),
               ),
+              if (state.currentTaskTitle != null &&
+                  state.currentTaskTitle!.isNotEmpty)
+                Positioned(
+                  left: mediaPadding.left + 24,
+                  bottom: mediaPadding.bottom + 20,
+                  right: mediaPadding.right + 24,
+                  child: AnimatedOpacity(
+                    duration: const Duration(milliseconds: 180),
+                    opacity: _showExitButton ? 1 : 0,
+                    child: Text(
+                      state.currentTaskTitle!,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        color: Colors.white70,
+                        fontSize: 18,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ),
             ],
           ),
         ),
@@ -1168,7 +1376,7 @@ class _FocusHeatmap extends StatelessWidget {
       final ratio = maxValue.inSeconds == 0
           ? 0.0
           : value.inSeconds / maxValue.inSeconds;
-      final alpha = 0.22 + ratio.clamp(0, 1) * 0.78;
+      final alpha = 0.22 + ratio.clamp(0.0, 1.0).toDouble() * 0.78;
       final base = darkMode ? const Color(0xFFA8D4C5) : const Color(0xFF476C63);
       return base.withValues(alpha: alpha);
     }
@@ -1289,6 +1497,8 @@ class _SimpleMetricTile extends StatelessWidget {
           const SizedBox(height: 6),
           Text(
             value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
             style: Theme.of(
               context,
             ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
@@ -1300,6 +1510,167 @@ class _SimpleMetricTile extends StatelessWidget {
 }
 
 /// 时段分布行（标签 + 进度条 + 数值）。
+class _TaskStatsCard extends StatelessWidget {
+  const _TaskStatsCard({required this.strings, required this.stats});
+
+  final AppStrings strings;
+  final _TaskStatsData stats;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(18, 16, 18, 18),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              strings.taskStats,
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              children: [
+                _SimpleMetricTile(
+                  title: strings.totalTasks,
+                  value: '${stats.totalTasks}',
+                ),
+                _SimpleMetricTile(
+                  title: strings.completedOnly,
+                  value: '${stats.completedTasks}',
+                ),
+                _SimpleMetricTile(
+                  title: strings.activeOnly,
+                  value: '${stats.activeTasks}',
+                ),
+                _SimpleMetricTile(
+                  title: strings.taskCompletionRate,
+                  value:
+                      '${(stats.completionRate * 100).toStringAsFixed(0)}%',
+                ),
+                _SimpleMetricTile(
+                  title: strings.linkedFocusSessions,
+                  value: '${stats.linkedFocusSessions}',
+                ),
+                _SimpleMetricTile(
+                  title: strings.topFocusTask,
+                  value: stats.topFocusTaskTitle ?? strings.noFocusTask,
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Text(
+              strings.categoryDistribution,
+              style: theme.textTheme.labelLarge?.copyWith(
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 8),
+            if (stats.labelCounts.isEmpty)
+              Text(strings.noLabel, style: theme.textTheme.bodyMedium)
+            else
+              ...stats.labelCounts.entries.map((entry) {
+                final label = entry.key == null
+                    ? strings.noLabel
+                    : strings.taskLabelName(entry.key!);
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: _CountTrendRow(
+                    label: label,
+                    value: entry.value,
+                    maxValue: stats.maxLabelCount,
+                  ),
+                );
+              }),
+            const SizedBox(height: 8),
+            Text(
+              strings.priorityDistribution,
+              style: theme.textTheme.labelLarge?.copyWith(
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 8),
+            ...stats.priorityCounts.entries.map((entry) {
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: _CountTrendRow(
+                  label: strings.priorityName(entry.key),
+                  value: entry.value,
+                  maxValue: stats.maxPriorityCount,
+                ),
+              );
+            }),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _CountTrendRow extends StatelessWidget {
+  const _CountTrendRow({
+    required this.label,
+    required this.value,
+    required this.maxValue,
+  });
+
+  final String label;
+  final int value;
+  final int maxValue;
+
+  @override
+  Widget build(BuildContext context) {
+    final darkMode = Theme.of(context).brightness == Brightness.dark;
+    final barColor = darkMode
+        ? const Color(0xFFA8D4C5)
+        : const Color(0xFF476C63);
+    final baseColor = darkMode
+        ? const Color(0xFF2A3A33)
+        : const Color(0xFFE8DED0);
+    final ratio = maxValue == 0 ? 0.0 : value / maxValue;
+
+    return Row(
+      children: [
+        SizedBox(
+          width: 88,
+          child: Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(999),
+            child: LinearProgressIndicator(
+              minHeight: 9,
+              value: ratio.clamp(0.0, 1.0).toDouble(),
+              color: barColor,
+              backgroundColor: baseColor,
+            ),
+          ),
+        ),
+        const SizedBox(width: 10),
+        SizedBox(
+          width: 36,
+          child: Text(
+            '$value',
+            textAlign: TextAlign.end,
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 class _TrendRow extends StatelessWidget {
   const _TrendRow({
     required this.label,
@@ -1336,7 +1707,7 @@ class _TrendRow extends StatelessWidget {
             borderRadius: BorderRadius.circular(999),
             child: LinearProgressIndicator(
               minHeight: 9,
-              value: ratio.clamp(0, 1),
+              value: ratio.clamp(0.0, 1.0).toDouble(),
               color: barColor,
               backgroundColor: baseColor,
             ),
@@ -1359,6 +1730,105 @@ class _TrendRow extends StatelessWidget {
 /// 统计数据聚合结果对象。
 ///
 /// 把原始会话列表整理成 UI 直接可消费的统计字段。
+class _TaskStatsData {
+  const _TaskStatsData({
+    required this.totalTasks,
+    required this.completedTasks,
+    required this.activeTasks,
+    required this.completionRate,
+    required this.labelCounts,
+    required this.priorityCounts,
+    required this.linkedFocusSessions,
+    required this.topFocusTaskTitle,
+  });
+
+  factory _TaskStatsData.fromTasks(
+    List<Task> tasks,
+    List<FocusSessionRecord> sessions,
+  ) {
+    final labelCounts = <String?, int>{};
+    final priorityCounts = <int, int>{1: 0, 2: 0, 3: 0};
+    var completed = 0;
+    var active = 0;
+    for (final task in tasks) {
+      if (task.status == TaskStatus.completed.value) {
+        completed++;
+      } else {
+        active++;
+      }
+      final label = task.label?.trim();
+      final labelKey = label == null || label.isEmpty ? null : label;
+      labelCounts[labelKey] = (labelCounts[labelKey] ?? 0) + 1;
+      final priority = switch (task.priority) {
+        1 => 1,
+        2 => 2,
+        _ => 3,
+      };
+      priorityCounts[priority] = (priorityCounts[priority] ?? 0) + 1;
+    }
+
+    final titleByTaskId = <String, String>{
+      for (final task in tasks) task.id: task.title,
+    };
+    final focusByTaskId = <String, Duration>{};
+    final snapshotByTaskId = <String, String>{};
+    var linkedSessions = 0;
+    for (final session in sessions) {
+      final taskId = session.taskId;
+      if (taskId == null || taskId.isEmpty) {
+        continue;
+      }
+      linkedSessions++;
+      focusByTaskId[taskId] =
+          (focusByTaskId[taskId] ?? Duration.zero) + session.duration;
+      final snapshot = session.taskTitleSnapshot;
+      if (snapshot != null && snapshot.isNotEmpty) {
+        snapshotByTaskId[taskId] = snapshot;
+      }
+    }
+    String? topFocusTaskTitle;
+    Duration topFocusDuration = Duration.zero;
+    for (final entry in focusByTaskId.entries) {
+      if (entry.value > topFocusDuration) {
+        topFocusDuration = entry.value;
+        topFocusTaskTitle =
+            titleByTaskId[entry.key] ?? snapshotByTaskId[entry.key];
+      }
+    }
+
+    final total = tasks.length;
+    return _TaskStatsData(
+      totalTasks: total,
+      completedTasks: completed,
+      activeTasks: active,
+      completionRate: total == 0 ? 0 : completed / total,
+      labelCounts: labelCounts,
+      priorityCounts: priorityCounts,
+      linkedFocusSessions: linkedSessions,
+      topFocusTaskTitle: topFocusTaskTitle,
+    );
+  }
+
+  final int totalTasks;
+  final int completedTasks;
+  final int activeTasks;
+  final double completionRate;
+  final Map<String?, int> labelCounts;
+  final Map<int, int> priorityCounts;
+  final int linkedFocusSessions;
+  final String? topFocusTaskTitle;
+
+  int get maxLabelCount => labelCounts.values.fold(
+        0,
+        (max, item) => item > max ? item : max,
+      );
+
+  int get maxPriorityCount => priorityCounts.values.fold(
+        0,
+        (max, item) => item > max ? item : max,
+      );
+}
+
 class _FocusStatsData {
   const _FocusStatsData({
     required this.todayFocus,
@@ -1595,9 +2065,13 @@ double _dialProgress(FocusState state) {
     if (targetSeconds <= 0) {
       return 0;
     }
-    return (state.elapsed.inSeconds / targetSeconds).clamp(0, 1);
+    return (state.elapsed.inSeconds / targetSeconds)
+        .clamp(0.0, 1.0)
+        .toDouble();
   }
-  return ((state.elapsed.inSeconds % 3600) / 3600).clamp(0, 1);
+  return ((state.elapsed.inSeconds % 3600) / 3600)
+      .clamp(0.0, 1.0)
+      .toDouble();
 }
 
 /// 把计时时长格式化为 `mm:ss` 或 `hh:mm:ss`。

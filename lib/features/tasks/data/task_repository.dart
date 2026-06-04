@@ -18,7 +18,17 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart' show StateProvider;
 
 import 'local_database.dart';
+import 'task_schedule_controller.dart';
 export 'local_database.dart' show DraftEntry, Task;
+export 'task_schedule_controller.dart'
+    show
+        TaskRepeatRule,
+        TaskScheduleMetadata,
+        effectiveTaskSchedule,
+        isSameTaskDate,
+        taskDateOnly,
+        taskOccursOnDate,
+        taskScheduleControllerProvider;
 
 /// 任务状态枚举。
 ///
@@ -33,6 +43,8 @@ enum TaskStatus {
   final int value;
 }
 
+enum TaskStatusFilter { all, active, completed }
+
 /// 任务编辑页值对象。
 ///
 /// 这个类把“编辑表单的中间状态”从页面组件中抽离出来，
@@ -42,18 +54,32 @@ class TaskEditorValue {
     this.title = '',
     this.description = '',
     this.dueAt,
+    this.scheduledDate,
+    this.startAt,
+    this.endAt,
     this.label,
+    this.priority = 3,
+    this.repeatRule = TaskRepeatRule.none,
     this.isImportant = false,
     this.isUrgent = false,
   });
 
   /// 从正式任务实体构造编辑器值对象。
-  factory TaskEditorValue.fromTask(Task task) {
+  factory TaskEditorValue.fromTask(
+    Task task, {
+    TaskScheduleMetadata? schedule,
+  }) {
+    final resolvedSchedule = schedule ?? TaskScheduleMetadata.fromTask(task);
     return TaskEditorValue(
       title: task.title,
       description: task.description ?? '',
       dueAt: task.dueAt,
+      scheduledDate: resolvedSchedule.scheduledDate,
+      startAt: resolvedSchedule.startAt,
+      endAt: resolvedSchedule.endAt,
       label: task.label,
+      priority: task.priority,
+      repeatRule: resolvedSchedule.repeatRule,
       isImportant: task.isImportant,
       isUrgent: task.isUrgent,
     );
@@ -65,7 +91,10 @@ class TaskEditorValue {
       title: draft.title ?? '',
       description: draft.description ?? '',
       dueAt: draft.dueAt,
+      scheduledDate: draft.dueAt == null ? null : taskDateOnly(draft.dueAt!),
+      endAt: draft.dueAt,
       label: draft.label,
+      priority: draft.priority,
       isImportant: draft.isImportant,
       isUrgent: draft.isUrgent,
     );
@@ -74,9 +103,23 @@ class TaskEditorValue {
   final String title;
   final String description;
   final DateTime? dueAt;
+  final DateTime? scheduledDate;
+  final DateTime? startAt;
+  final DateTime? endAt;
   final String? label;
+  final int priority;
+  final TaskRepeatRule repeatRule;
   final bool isImportant;
   final bool isUrgent;
+
+  TaskScheduleMetadata toScheduleMetadata() {
+    return TaskScheduleMetadata(
+      scheduledDate: scheduledDate ?? (dueAt == null ? null : taskDateOnly(dueAt!)),
+      startAt: startAt,
+      endAt: endAt ?? dueAt,
+      repeatRule: repeatRule,
+    );
+  }
 
   /// 复制当前值对象，并按需替换部分字段。
   TaskEditorValue copyWith({
@@ -84,8 +127,16 @@ class TaskEditorValue {
     String? description,
     DateTime? dueAt,
     bool clearDueAt = false,
+    DateTime? scheduledDate,
+    bool clearScheduledDate = false,
+    DateTime? startAt,
+    bool clearStartAt = false,
+    DateTime? endAt,
+    bool clearEndAt = false,
     String? label,
     bool clearLabel = false,
+    int? priority,
+    TaskRepeatRule? repeatRule,
     bool? isImportant,
     bool? isUrgent,
   }) {
@@ -93,7 +144,14 @@ class TaskEditorValue {
       title: title ?? this.title,
       description: description ?? this.description,
       dueAt: clearDueAt ? null : dueAt ?? this.dueAt,
+      scheduledDate: clearScheduledDate
+          ? null
+          : scheduledDate ?? this.scheduledDate,
+      startAt: clearStartAt ? null : startAt ?? this.startAt,
+      endAt: clearEndAt ? null : endAt ?? this.endAt,
       label: clearLabel ? null : label ?? this.label,
+      priority: priority ?? this.priority,
+      repeatRule: repeatRule ?? this.repeatRule,
       isImportant: isImportant ?? this.isImportant,
       isUrgent: isUrgent ?? this.isUrgent,
     );
@@ -104,7 +162,12 @@ class TaskEditorValue {
     return title.trim().isNotEmpty ||
         description.trim().isNotEmpty ||
         dueAt != null ||
+        scheduledDate != null ||
+        startAt != null ||
+        endAt != null ||
         label != null ||
+        priority != 3 ||
+        repeatRule != TaskRepeatRule.none ||
         isImportant ||
         isUrgent;
   }
@@ -143,6 +206,14 @@ final taskSelectionModeProvider = StateProvider<bool>((ref) => false);
 
 /// 当前首页按标签筛选状态，`null` 表示收集箱（不过滤）。
 final selectedTaskLabelProvider = StateProvider<String?>((ref) => null);
+
+final taskSearchQueryProvider = StateProvider<String>((ref) => '');
+
+final taskPriorityFilterProvider = StateProvider<int?>((ref) => null);
+
+final taskStatusFilterProvider = StateProvider<TaskStatusFilter>(
+  (ref) => TaskStatusFilter.all,
+);
 
 /// 控制“已完成”分组是否折叠。
 final completedCollapsedProvider = StateProvider<bool>((ref) => true);
@@ -187,7 +258,7 @@ class TaskRepository {
   }
 
   /// 创建一条新任务。
-  Future<void> createTask(TaskEditorValue value) async {
+  Future<String> createTask(TaskEditorValue value) async {
     final firstActiveTask =
         await (_database.select(_database.tasks)
               ..where((table) => table.status.equals(TaskStatus.active.value))
@@ -198,16 +269,18 @@ class TaskRepository {
               ..limit(1))
             .getSingleOrNull();
     final now = DateTime.now();
+    final taskId = '${now.microsecondsSinceEpoch}';
 
     await _database
         .into(_database.tasks)
         .insert(
           TasksCompanion.insert(
-            id: '${now.microsecondsSinceEpoch}',
+            id: taskId,
             title: value.title.trim(),
             description: Value(_nullableText(value.description)),
             dueAt: Value(value.dueAt),
             label: Value(_nullableText(value.label ?? '')),
+            priority: Value(value.priority),
             isImportant: Value(value.isImportant),
             isUrgent: Value(value.isUrgent),
             status: Value(TaskStatus.active.value),
@@ -217,6 +290,7 @@ class TaskRepository {
             updatedAt: now,
           ),
         );
+    return taskId;
   }
 
   /// 更新一条已有任务。
@@ -242,6 +316,7 @@ class TaskRepository {
         description: Value(_nullableText(value.description)),
         dueAt: Value(value.dueAt),
         label: Value(_nullableText(value.label ?? '')),
+        priority: Value(value.priority),
         isImportant: Value(value.isImportant),
         isUrgent: Value(value.isUrgent),
         completedAt: Value(existing.completedAt),
@@ -375,6 +450,7 @@ class TaskRepository {
             description: Value(_nullableText(value.description)),
             dueAt: Value(value.dueAt),
             label: Value(_nullableText(value.label ?? '')),
+            priority: Value(value.priority),
             isImportant: Value(value.isImportant),
             isUrgent: Value(value.isUrgent),
             updatedAt: now,

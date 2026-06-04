@@ -61,8 +61,12 @@ class _TaskEditorPageState extends ConsumerState<TaskEditorPage> {
   late final FocusNode _titleFocusNode;
   late final FocusNode _descriptionFocusNode;
 
+  late DateTime? _scheduledDate;
+  late DateTime? _startAt;
   late DateTime? _dueAt;
   late String? _selectedLabelId;
+  late int _priority;
+  late TaskRepeatRule _repeatRule;
   late bool _isImportant;
   late bool _isUrgent;
   var _submitting = false;
@@ -78,8 +82,16 @@ class _TaskEditorPageState extends ConsumerState<TaskEditorPage> {
     );
     _titleFocusNode = FocusNode();
     _descriptionFocusNode = FocusNode();
-    _dueAt = widget.initialValue.dueAt;
+    _scheduledDate =
+        widget.initialValue.scheduledDate ??
+        (widget.initialValue.dueAt == null
+            ? null
+            : taskDateOnly(widget.initialValue.dueAt!));
+    _startAt = widget.initialValue.startAt;
+    _dueAt = widget.initialValue.endAt ?? widget.initialValue.dueAt;
     _selectedLabelId = widget.initialValue.label;
+    _priority = widget.initialValue.priority;
+    _repeatRule = widget.initialValue.repeatRule;
     _isImportant = widget.initialValue.isImportant;
     _isUrgent = widget.initialValue.isUrgent;
 
@@ -175,7 +187,9 @@ class _TaskEditorPageState extends ConsumerState<TaskEditorPage> {
                 ),
               ),
               const SizedBox(height: 22),
-              Text(strings.dueDate, style: theme.textTheme.titleMedium),
+              ..._buildScheduleFields(theme, darkMode, strings),
+              const SizedBox(height: 22),
+              Text(strings.endTime, style: theme.textTheme.titleMedium),
               const SizedBox(height: 12),
               InkWell(
                 borderRadius: BorderRadius.circular(22),
@@ -289,10 +303,69 @@ class _TaskEditorPageState extends ConsumerState<TaskEditorPage> {
     title: _titleController.text,
     description: _descriptionController.text,
     dueAt: _dueAt,
+    scheduledDate: _scheduledDate,
+    startAt: _startAt,
+    endAt: _dueAt,
     label: _selectedLabelId,
+    priority: _priority,
+    repeatRule: _repeatRule,
     isImportant: _isImportant,
     isUrgent: _isUrgent,
   );
+
+  List<Widget> _buildScheduleFields(
+    ThemeData theme,
+    bool darkMode,
+    AppStrings strings,
+  ) {
+    return [
+      Text(strings.taskDate, style: theme.textTheme.titleMedium),
+      const SizedBox(height: 12),
+      _EditorPickerTile(
+        darkMode: darkMode,
+        value: _buildTaskDateSummary(),
+        canClear: _scheduledDate != null,
+        onClear: () {
+          _dismissKeyboard();
+          setState(() {
+            _scheduledDate = null;
+            _startAt = null;
+            _dueAt = null;
+          });
+        },
+        onTap: _pickTaskDate,
+      ),
+      const SizedBox(height: 22),
+      Text(strings.startTime, style: theme.textTheme.titleMedium),
+      const SizedBox(height: 12),
+      _EditorPickerTile(
+        darkMode: darkMode,
+        value: _buildTimeSummary(_startAt, strings.noStartTime),
+        canClear: _startAt != null,
+        onClear: () {
+          _dismissKeyboard();
+          setState(() => _startAt = null);
+        },
+        onTap: () => _pickTime(isStart: true),
+      ),
+      const SizedBox(height: 22),
+      Text(strings.priority, style: theme.textTheme.titleMedium),
+      const SizedBox(height: 12),
+      _EditorPickerTile(
+        darkMode: darkMode,
+        value: strings.priorityName(_priority),
+        onTap: _pickPriority,
+      ),
+      const SizedBox(height: 22),
+      Text(strings.repeatRule, style: theme.textTheme.titleMedium),
+      const SizedBox(height: 12),
+      _EditorPickerTile(
+        darkMode: darkMode,
+        value: _repeatRuleName(strings, _repeatRule),
+        onTap: _pickRepeatRule,
+      ),
+    ];
+  }
 
   /// 关闭当前页面上的输入焦点和输入法。
   ///
@@ -308,7 +381,7 @@ class _TaskEditorPageState extends ConsumerState<TaskEditorPage> {
   /// 如果尚未设置截止时间，返回占位文案；否则返回包含日期和时间的完整文本。
   String _buildDueDateSummary() {
     if (_dueAt == null) {
-      return ref.read(appStringsProvider).noDueDate;
+      return ref.read(appStringsProvider).noEndTime;
     }
 
     final strings = ref.read(appStringsProvider);
@@ -321,6 +394,34 @@ class _TaskEditorPageState extends ConsumerState<TaskEditorPage> {
       strings.dateLocale,
     ).format(_dueAt!);
     return '$datePart  $timePart';
+  }
+
+  String _buildTaskDateSummary() {
+    if (_scheduledDate == null) {
+      return ref.read(appStringsProvider).noDueDate;
+    }
+    final strings = ref.read(appStringsProvider);
+    return DateFormat(
+      strings.dateSummaryPattern,
+      strings.dateLocale,
+    ).format(_scheduledDate!);
+  }
+
+  String _buildTimeSummary(DateTime? value, String emptyText) {
+    if (value == null) {
+      return emptyText;
+    }
+    final strings = ref.read(appStringsProvider);
+    return DateFormat(strings.timeSummaryPattern, strings.dateLocale).format(value);
+  }
+
+  String _repeatRuleName(AppStrings strings, TaskRepeatRule rule) {
+    return switch (rule) {
+      TaskRepeatRule.none => strings.repeatNone,
+      TaskRepeatRule.daily => strings.repeatDaily,
+      TaskRepeatRule.weekly => strings.repeatWeekly,
+      TaskRepeatRule.monthly => strings.repeatMonthly,
+    };
   }
 
   /// 生成标签区域的摘要文本。
@@ -339,7 +440,12 @@ class _TaskEditorPageState extends ConsumerState<TaskEditorPage> {
     return value.title.trim() != widget.initialValue.title.trim() ||
         value.description.trim() != widget.initialValue.description.trim() ||
         value.dueAt != widget.initialValue.dueAt ||
+        value.scheduledDate != widget.initialValue.scheduledDate ||
+        value.startAt != widget.initialValue.startAt ||
+        value.endAt != widget.initialValue.endAt ||
         value.label != widget.initialValue.label ||
+        value.priority != widget.initialValue.priority ||
+        value.repeatRule != widget.initialValue.repeatRule ||
         value.isImportant != widget.initialValue.isImportant ||
         value.isUrgent != widget.initialValue.isUrgent;
   }
@@ -374,8 +480,12 @@ class _TaskEditorPageState extends ConsumerState<TaskEditorPage> {
     setState(() {
       _titleController.text = draftValue.title;
       _descriptionController.text = draftValue.description;
+      _scheduledDate = draftValue.scheduledDate;
+      _startAt = draftValue.startAt;
       _dueAt = draftValue.dueAt;
       _selectedLabelId = draftValue.label;
+      _priority = draftValue.priority;
+      _repeatRule = draftValue.repeatRule;
       _isImportant = draftValue.isImportant;
       _isUrgent = draftValue.isUrgent;
     });
@@ -502,21 +612,222 @@ class _TaskEditorPageState extends ConsumerState<TaskEditorPage> {
   ///
   /// 这里显式拆成五列滚轮：年、月、日、小时、分钟。
   /// 日期列会根据当前年份和月份动态计算天数，并自动纠正超出范围的日值。
+  Future<void> _pickTaskDate() async {
+    _dismissKeyboard();
+    final strings = ref.read(appStringsProvider);
+    final now = DateTime.now();
+    final base = _scheduledDate ?? _dueAt ?? _startAt ?? now;
+    var selectedYear = base.year.clamp(now.year, 2100).toInt();
+    var selectedMonth = base.month;
+    var selectedDay = base.day;
+
+    int currentMaxDay() =>
+        DateUtils.getDaysInMonth(selectedYear, selectedMonth);
+    selectedDay = selectedDay.clamp(1, currentMaxDay()).toInt();
+
+    final yearController = FixedExtentScrollController(
+      initialItem: selectedYear - now.year,
+    );
+    final monthController = FixedExtentScrollController(
+      initialItem: selectedMonth - 1,
+    );
+    final dayController = FixedExtentScrollController(
+      initialItem: selectedDay - 1,
+    );
+
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            final maxDay = currentMaxDay();
+            final dayItems = List<int>.generate(maxDay, (index) => index + 1);
+
+            void syncDayWithinRange() {
+              if (selectedDay > maxDay) {
+                selectedDay = maxDay;
+                dayController.jumpToItem(selectedDay - 1);
+              }
+            }
+
+            return _DatePickerSheet(
+              yearController: yearController,
+              monthController: monthController,
+              dayController: dayController,
+              dayItems: dayItems,
+              startYear: now.year,
+              strings: strings,
+              onCancel: () => Navigator.of(context).pop(),
+              onConfirm: () {
+                final selectedDate = DateTime(
+                  selectedYear,
+                  selectedMonth,
+                  selectedDay,
+                );
+                setState(() {
+                  _scheduledDate = selectedDate;
+                  _startAt = _moveTimeToDate(_startAt, selectedDate);
+                  _dueAt = _moveTimeToDate(_dueAt, selectedDate);
+                });
+                Navigator.of(context).pop();
+              },
+              onYearChanged: (index) {
+                setModalState(() {
+                  selectedYear = now.year + index;
+                  syncDayWithinRange();
+                });
+              },
+              onMonthChanged: (index) {
+                setModalState(() {
+                  selectedMonth = index + 1;
+                  syncDayWithinRange();
+                });
+              },
+              onDayChanged: (index) {
+                selectedDay = index + 1;
+              },
+            );
+          },
+        );
+      },
+    );
+
+    _dismissKeyboard();
+  }
+
+  Future<void> _pickTime({required bool isStart}) async {
+    _dismissKeyboard();
+    final strings = ref.read(appStringsProvider);
+    final date = _scheduledDate ?? taskDateOnly(DateTime.now());
+    final current = isStart ? _startAt : _dueAt;
+    var selectedHour = (current ?? DateTime.now()).hour;
+    var selectedMinute = (current ?? DateTime.now()).minute;
+
+    final hourController = FixedExtentScrollController(initialItem: selectedHour);
+    final minuteController = FixedExtentScrollController(
+      initialItem: selectedMinute,
+    );
+
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (context) {
+        return _TimePickerSheet(
+          title: isStart ? strings.startTime : strings.endTime,
+          hourController: hourController,
+          minuteController: minuteController,
+          strings: strings,
+          onCancel: () => Navigator.of(context).pop(),
+          onConfirm: () {
+            final selected = DateTime(
+              date.year,
+              date.month,
+              date.day,
+              selectedHour,
+              selectedMinute,
+            );
+            setState(() {
+              _scheduledDate ??= date;
+              if (isStart) {
+                _startAt = selected;
+              } else {
+                _dueAt = selected;
+              }
+            });
+            Navigator.of(context).pop();
+          },
+          onHourChanged: (index) => selectedHour = index,
+          onMinuteChanged: (index) => selectedMinute = index,
+        );
+      },
+    );
+
+    _dismissKeyboard();
+  }
+
+  Future<void> _pickPriority() async {
+    _dismissKeyboard();
+    final strings = ref.read(appStringsProvider);
+    final options = [1, 2, 3];
+    var selectedIndex = options.indexOf(_priority);
+    if (selectedIndex < 0) {
+      selectedIndex = 0;
+    }
+    final controller = FixedExtentScrollController(initialItem: selectedIndex);
+
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (context) {
+        return _SingleWheelPickerSheet(
+          strings: strings,
+          title: strings.priority,
+          controller: controller,
+          itemCount: options.length,
+          itemLabelBuilder: (index) => strings.priorityName(options[index]),
+          onCancel: () => Navigator.of(context).pop(),
+          onConfirm: () {
+            setState(() => _priority = options[selectedIndex]);
+            Navigator.of(context).pop();
+          },
+          onSelectedItemChanged: (index) => selectedIndex = index,
+        );
+      },
+    );
+  }
+
+  Future<void> _pickRepeatRule() async {
+    _dismissKeyboard();
+    final strings = ref.read(appStringsProvider);
+    final options = TaskRepeatRule.values;
+    var selectedIndex = options.indexOf(_repeatRule);
+    if (selectedIndex < 0) {
+      selectedIndex = 0;
+    }
+    final controller = FixedExtentScrollController(initialItem: selectedIndex);
+
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (context) {
+        return _SingleWheelPickerSheet(
+          strings: strings,
+          title: strings.repeatRule,
+          controller: controller,
+          itemCount: options.length,
+          itemLabelBuilder: (index) => _repeatRuleName(strings, options[index]),
+          onCancel: () => Navigator.of(context).pop(),
+          onConfirm: () {
+            setState(() => _repeatRule = options[selectedIndex]);
+            Navigator.of(context).pop();
+          },
+          onSelectedItemChanged: (index) => selectedIndex = index,
+        );
+      },
+    );
+  }
+
   Future<void> _pickDueDateTime() async {
     _dismissKeyboard();
     final strings = ref.read(appStringsProvider);
 
     final now = DateTime.now();
-    var selectedYear = (_dueAt ?? now).year.clamp(now.year, 2100);
-    var selectedMonth = (_dueAt ?? now).month;
-    var selectedDay = (_dueAt ?? now).day;
+    final base = _dueAt ?? _scheduledDate ?? now;
+    var selectedYear = base.year.clamp(now.year, 2100).toInt();
+    var selectedMonth = base.month;
+    var selectedDay = base.day;
     var selectedHour = (_dueAt ?? now).hour;
     var selectedMinute = (_dueAt ?? now).minute;
 
     int currentMaxDay() =>
         DateUtils.getDaysInMonth(selectedYear, selectedMonth);
 
-    selectedDay = selectedDay.clamp(1, currentMaxDay());
+    selectedDay = selectedDay.clamp(1, currentMaxDay()).toInt();
 
     final yearController = FixedExtentScrollController(
       initialItem: selectedYear - now.year,
@@ -570,6 +881,7 @@ class _TaskEditorPageState extends ConsumerState<TaskEditorPage> {
                     selectedHour,
                     selectedMinute,
                   );
+                  _scheduledDate = taskDateOnly(_dueAt!);
                 });
                 Navigator.of(context).pop();
               },
@@ -661,21 +973,33 @@ class _TaskEditorPageState extends ConsumerState<TaskEditorPage> {
       );
       return;
     }
+    if (_startAt != null && _dueAt != null && _dueAt!.isBefore(_startAt!)) {
+      TaskNetNotice.showInfo(
+        context,
+        ref.read(appStringsProvider).timeRangeInvalid,
+      );
+      return;
+    }
 
     _dismissKeyboard();
     setState(() => _submitting = true);
     final repository = ref.read(taskRepositoryProvider);
+    final scheduleController = ref.read(taskScheduleControllerProvider.notifier);
+    final savingValue = _currentValue.copyWith(title: trimmedTitle);
 
     try {
       if (widget.taskId == null) {
-        await repository.createTask(
-          _currentValue.copyWith(title: trimmedTitle),
+        final taskId = await repository.createTask(savingValue);
+        await scheduleController.saveSchedule(
+          taskId,
+          savingValue.toScheduleMetadata(),
         );
         await repository.clearDraft();
       } else {
-        await repository.updateTask(
+        await repository.updateTask(widget.taskId!, savingValue);
+        await scheduleController.saveSchedule(
           widget.taskId!,
-          _currentValue.copyWith(title: trimmedTitle),
+          savingValue.toScheduleMetadata(),
         );
       }
     } catch (error) {
@@ -702,6 +1026,172 @@ class _TaskEditorPageState extends ConsumerState<TaskEditorPage> {
 ///
 /// 这个组件把标题栏、列标签、滚轮区和中心高亮区组织成一个更统一的视觉结构，
 /// 避免使用默认样式时出现“提示文字过大”“选中项不在视觉中心”这类问题。
+class _EditorPickerTile extends StatelessWidget {
+  const _EditorPickerTile({
+    required this.darkMode,
+    required this.value,
+    required this.onTap,
+    this.canClear = false,
+    this.onClear,
+  });
+
+  final bool darkMode;
+  final String value;
+  final VoidCallback onTap;
+  final bool canClear;
+  final VoidCallback? onClear;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(22),
+      onTap: onTap,
+      child: Ink(
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 18),
+        decoration: BoxDecoration(
+          color: darkMode ? const Color(0xFF1C241F) : Colors.white,
+          borderRadius: BorderRadius.circular(22),
+          border: Border.all(
+            color: darkMode ? const Color(0xFF334039) : const Color(0xFFE5DBCF),
+          ),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(value, style: Theme.of(context).textTheme.bodyLarge),
+            ),
+            if (canClear)
+              IconButton(
+                onPressed: onClear,
+                icon: const Icon(Icons.close_rounded),
+              ),
+            const Icon(Icons.chevron_right_rounded),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _DatePickerSheet extends StatelessWidget {
+  const _DatePickerSheet({
+    required this.yearController,
+    required this.monthController,
+    required this.dayController,
+    required this.dayItems,
+    required this.startYear,
+    required this.strings,
+    required this.onCancel,
+    required this.onConfirm,
+    required this.onYearChanged,
+    required this.onMonthChanged,
+    required this.onDayChanged,
+  });
+
+  final FixedExtentScrollController yearController;
+  final FixedExtentScrollController monthController;
+  final FixedExtentScrollController dayController;
+  final List<int> dayItems;
+  final int startYear;
+  final AppStrings strings;
+  final VoidCallback onCancel;
+  final VoidCallback onConfirm;
+  final ValueChanged<int> onYearChanged;
+  final ValueChanged<int> onMonthChanged;
+  final ValueChanged<int> onDayChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return TaskNetWheelSheetFrame(
+      title: strings.taskDate,
+      cancelText: strings.cancel,
+      confirmText: strings.save,
+      onCancel: onCancel,
+      onConfirm: onConfirm,
+      labels: [strings.year, strings.month, strings.day],
+      child: Row(
+        children: [
+          TaskNetWheelColumn(
+            controller: yearController,
+            itemCount: 2100 - startYear + 1,
+            displayBuilder: (index) => '${startYear + index}',
+            onSelectedItemChanged: onYearChanged,
+          ),
+          TaskNetWheelColumn(
+            controller: monthController,
+            itemCount: 12,
+            displayBuilder: (index) => '${index + 1}',
+            onSelectedItemChanged: onMonthChanged,
+          ),
+          TaskNetWheelColumn(
+            controller: dayController,
+            itemCount: dayItems.length,
+            displayBuilder: (index) => '${dayItems[index]}',
+            onSelectedItemChanged: onDayChanged,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TimePickerSheet extends StatelessWidget {
+  const _TimePickerSheet({
+    required this.title,
+    required this.hourController,
+    required this.minuteController,
+    required this.strings,
+    required this.onCancel,
+    required this.onConfirm,
+    required this.onHourChanged,
+    required this.onMinuteChanged,
+  });
+
+  final String title;
+  final FixedExtentScrollController hourController;
+  final FixedExtentScrollController minuteController;
+  final AppStrings strings;
+  final VoidCallback onCancel;
+  final VoidCallback onConfirm;
+  final ValueChanged<int> onHourChanged;
+  final ValueChanged<int> onMinuteChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return TaskNetWheelSheetFrame(
+      title: title,
+      cancelText: strings.cancel,
+      confirmText: strings.save,
+      onCancel: onCancel,
+      onConfirm: onConfirm,
+      labels: [strings.hour, strings.minute],
+      child: Row(
+        children: [
+          TaskNetWheelColumn(
+            controller: hourController,
+            itemCount: 24,
+            displayBuilder: (index) => index.toString().padLeft(2, '0'),
+            onSelectedItemChanged: onHourChanged,
+          ),
+          TaskNetWheelColumn(
+            controller: minuteController,
+            itemCount: 60,
+            displayBuilder: (index) => index.toString().padLeft(2, '0'),
+            onSelectedItemChanged: onMinuteChanged,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+DateTime? _moveTimeToDate(DateTime? value, DateTime date) {
+  if (value == null) {
+    return null;
+  }
+  return DateTime(date.year, date.month, date.day, value.hour, value.minute);
+}
+
 class _DeadlinePickerSheet extends StatelessWidget {
   const _DeadlinePickerSheet({
     required this.yearController,

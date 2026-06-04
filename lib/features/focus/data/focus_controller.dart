@@ -34,6 +34,8 @@ class FocusSessionRecord {
     required this.duration,
     required this.mode,
     required this.completed,
+    this.taskId,
+    this.taskTitleSnapshot,
   });
 
   final DateTime startAt;
@@ -41,6 +43,8 @@ class FocusSessionRecord {
   final Duration duration;
   final FocusTimerMode mode;
   final bool completed;
+  final String? taskId;
+  final String? taskTitleSnapshot;
 }
 
 /// 专注页完整状态快照。
@@ -54,6 +58,8 @@ class FocusState {
     required this.commonDurations,
     required this.elapsed,
     required this.currentSessionStartedAt,
+    required this.currentTaskId,
+    required this.currentTaskTitle,
     required this.sessions,
     required this.completionSignal,
   });
@@ -66,6 +72,8 @@ class FocusState {
       commonDurations: [15, 30, 45, 60],
       elapsed: Duration.zero,
       currentSessionStartedAt: null,
+      currentTaskId: null,
+      currentTaskTitle: null,
       sessions: [],
       completionSignal: 0,
     );
@@ -77,6 +85,8 @@ class FocusState {
   final List<int> commonDurations;
   final Duration elapsed;
   final DateTime? currentSessionStartedAt;
+  final String? currentTaskId;
+  final String? currentTaskTitle;
   final List<FocusSessionRecord> sessions;
   final int completionSignal;
 
@@ -104,6 +114,9 @@ class FocusState {
     Duration? elapsed,
     DateTime? currentSessionStartedAt,
     bool clearCurrentSessionStartedAt = false,
+    String? currentTaskId,
+    String? currentTaskTitle,
+    bool clearCurrentTask = false,
     List<FocusSessionRecord>? sessions,
     int? completionSignal,
   }) {
@@ -116,6 +129,12 @@ class FocusState {
       currentSessionStartedAt: clearCurrentSessionStartedAt
           ? null
           : (currentSessionStartedAt ?? this.currentSessionStartedAt),
+      currentTaskId: clearCurrentTask
+          ? null
+          : (currentTaskId ?? this.currentTaskId),
+      currentTaskTitle: clearCurrentTask
+          ? null
+          : (currentTaskTitle ?? this.currentTaskTitle),
       sessions: sessions ?? this.sessions,
       completionSignal: completionSignal ?? this.completionSignal,
     );
@@ -188,6 +207,16 @@ class FocusController extends StateNotifier<FocusState> {
     );
     if (state.mode == FocusTimerMode.countdown) {
       _stopTicker();
+    }
+    unawaited(_persistState(force: true));
+  }
+
+  /// 选择或清除本次专注绑定的任务。
+  void setCurrentTask({String? taskId, String? title}) {
+    if (taskId == null) {
+      state = state.copyWith(clearCurrentTask: true);
+    } else {
+      state = state.copyWith(currentTaskId: taskId, currentTaskTitle: title);
     }
     unawaited(_persistState(force: true));
   }
@@ -352,6 +381,8 @@ class FocusController extends StateNotifier<FocusState> {
       duration: duration,
       mode: state.mode,
       completed: completed,
+      taskId: state.currentTaskId,
+      taskTitleSnapshot: state.currentTaskTitle,
     );
     state = state.copyWith(sessions: [...state.sessions, session]);
   }
