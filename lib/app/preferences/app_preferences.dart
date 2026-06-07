@@ -329,6 +329,15 @@ class AppStrings {
       ? '这里会优先服务你每天最常打开的清单体验。现在可以先点右下角，写下今天要推进的第一项任务。'
       : 'Your daily list will live here. Tap the button in the corner to add the first task you want to move forward.';
 
+  /// 标签过滤空状态标题。
+  String get emptyLabelTitle =>
+      isChinese ? '该标签下暂无任务' : 'No tasks with this label';
+
+  /// 标签过滤空状态说明。
+  String get emptyLabelBody => isChinese
+      ? '换个标签看看，或者创建新任务'
+      : 'Try a different label, or create a new task';
+
   /// 日历待办空状态标题。
   String get calendarNoTodoTitle =>
       isChinese ? '这一天没有待办' : 'No todo on this day';
@@ -409,13 +418,7 @@ class AppStrings {
   /// 标签字段标题。
   String get taskLabel => isChinese ? '标签' : 'Label';
 
-  String get taskDate => isChinese ? '任务日期' : 'Task date';
-
-  String get startTime => isChinese ? '开始时间' : 'Start time';
-
   String get endTime => isChinese ? '结束时间' : 'End time';
-
-  String get noStartTime => isChinese ? '暂不设置开始时间' : 'No start time';
 
   String get noEndTime => isChinese ? '暂不设置结束时间' : 'No end time';
 
@@ -434,19 +437,6 @@ class AppStrings {
       _ => priorityLow,
     };
   }
-
-  String get repeatRule => isChinese ? '重复' : 'Repeat';
-
-  String get repeatNone => isChinese ? '不重复' : 'No repeat';
-
-  String get repeatDaily => isChinese ? '每天' : 'Daily';
-
-  String get repeatWeekly => isChinese ? '每周' : 'Weekly';
-
-  String get repeatMonthly => isChinese ? '每月' : 'Monthly';
-
-  String get timeRangeInvalid =>
-      isChinese ? '结束时间不能早于开始时间' : 'End time cannot be before start time';
 
   String get searchTasks => isChinese ? '搜索任务' : 'Search tasks';
 
@@ -610,9 +600,6 @@ class AppStrings {
 
   /// 专注会话完成提示。
   String get focusCompleted => isChinese ? '本次专注完成' : 'Focus session completed';
-
-  /// 未设置截止时间时的占位文案。
-  String get noDueDate => isChinese ? '暂不设置' : 'Not set';
 
   /// 未设置标签时的占位文案。
   String get noLabel => isChinese ? '无标签' : 'No label';
