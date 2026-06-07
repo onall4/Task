@@ -1,3 +1,13 @@
+/*
+ * 任务详情底部弹出面板。
+ *
+ * 这个文件负责实现点击任务卡片后从底部弹出的详情面板：
+ * - 显示任务标题、描述、截止时间、标签等完整信息
+ * - 提供编辑和完成切换的快捷操作
+ * - 通过 showModalBottomSheet 以半屏形式呈现
+ *
+ * 面板内容根据暗色/亮色主题自适应，并在编辑操作完成后自动关闭。
+ */
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 

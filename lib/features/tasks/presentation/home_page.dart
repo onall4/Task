@@ -40,7 +40,7 @@ class _HomePageState extends ConsumerState<HomePage> {
   List<String>? _optimisticActiveOrder;
 
   /// 列表区域和折叠区使用统一的过渡时长，避免首页多个动画节奏不一致。
-  static const _completedSectionAnimationDuration = Duration(milliseconds: 720);
+  static const _sectionCollapseDuration = Duration(milliseconds: 1080);
   static const _completionStrikeDuration = Duration(milliseconds: 320);
   static const _sectionMoveDuration = Duration(milliseconds: 420);
   static const _longPressDragSlop = 12.0;
@@ -83,7 +83,6 @@ class _HomePageState extends ConsumerState<HomePage> {
     final tasksAsync = ref.watch(taskListProvider);
     final activeCollapsed = ref.watch(activeCollapsedProvider);
     final completedCollapsed = ref.watch(completedCollapsedProvider);
-    final overdueCollapsed = ref.watch(overdueCollapsedProvider);
     final isSelectionMode = ref.watch(taskSelectionModeProvider);
     final selectedIds = ref.watch(selectedTaskIdsProvider);
     final selectedLabel = ref.watch(selectedTaskLabelProvider);
@@ -105,41 +104,29 @@ class _HomePageState extends ConsumerState<HomePage> {
                   statusFilter,
                 ))
             .toList(growable: false);
-        final overdueTasks = tasks
+        final overdueTaskIds = tasks
             .where((task) => task.status == TaskStatus.active.value)
             .where((task) => task.dueAt != null && task.dueAt!.isBefore(today))
-            .where((task) => _matchesHomeFilters(
-                  task,
-                  selectedLabel,
-                  searchQuery,
-                  priorityFilter,
-                  statusFilter,
-                ))
-            .toList(growable: false);
-        final overdueTaskIds = overdueTasks.map((task) => task.id).toSet();
-        final scopedWithoutOverdue = scopedTasks
-            .where((task) => !overdueTaskIds.contains(task.id))
-            .toList(growable: false);
+            .map((task) => task.id)
+            .toSet();
         final scopedMoves = _sectionMoves.values
             .where(
-              (move) =>
-                  _matchesHomeFilters(
-                    move.task,
-                    selectedLabel,
-                    searchQuery,
-                    priorityFilter,
-                    statusFilter,
-                  ) &&
-                  !overdueTaskIds.contains(move.task.id),
+              (move) => _matchesHomeFilters(
+                move.task,
+                selectedLabel,
+                searchQuery,
+                priorityFilter,
+                statusFilter,
+              ),
             )
             .toList(growable: false);
-        final activeTasks = _buildActiveTasks(scopedWithoutOverdue, scopedMoves);
+        final activeTasks = _buildActiveTasks(scopedTasks, scopedMoves);
         final orderedActiveTasks = _applyOptimisticOrder(activeTasks);
         final visibleActiveTasks =
             activeCollapsed && _activeSectionAnimatingToCollapsed != true
             ? <Task>[]
             : orderedActiveTasks;
-        final pendingCompletedTasks = scopedWithoutOverdue
+        final pendingCompletedTasks = scopedTasks
             .where(
               (task) =>
                   task.status == TaskStatus.active.value &&
@@ -148,10 +135,23 @@ class _HomePageState extends ConsumerState<HomePage> {
             .map(_buildOptimisticCompletedTask)
             .toList();
         final completedTasks = _buildCompletedTasks(
-          scopedWithoutOverdue,
+          scopedTasks,
           scopedMoves,
           pendingCompletedTasks,
         );
+
+        if (scopedTasks.isEmpty &&
+            _sectionMoves.isEmpty &&
+            _dragCompletingTaskIds.isEmpty) {
+          return _buildHomeEmptyState(
+            strings,
+            selectedLabel,
+            searchQuery,
+            priorityFilter,
+            statusFilter,
+          );
+        }
+
         final itemCount = visibleActiveTasks.length + 1;
 
         return KeyedSubtree(
@@ -274,23 +274,14 @@ class _HomePageState extends ConsumerState<HomePage> {
                 ),
               ],
             ),
-            footer: Column(
-              children: [
-                _buildCompletedTasksFooter(
-                  ref,
-                  completedTasks,
-                  scopedMoves,
-                  completedCollapsed,
-                  isSelectionMode,
-                  selectedIds,
-                  strings,
-                ),
-                _buildOverdueTasksFooter(
-                  overdueTasks,
-                  overdueCollapsed,
-                  strings,
-                ),
-              ],
+            footer: _buildCompletedTasksFooter(
+              ref,
+              completedTasks,
+              scopedMoves,
+              completedCollapsed,
+              isSelectionMode,
+              selectedIds,
+              strings,
             ),
             itemBuilder: (context, index) {
               if (index == visibleActiveTasks.length) {
@@ -318,6 +309,9 @@ class _HomePageState extends ConsumerState<HomePage> {
                   visibleDuringAnimation:
                       _activeSectionAnimatingToCollapsed != null &&
                       !_sectionMoves.containsKey(task.id),
+                  animationDuration: _sectionMoves.containsKey(task.id)
+                      ? _sectionMoveDuration
+                      : _sectionCollapseDuration,
                   child: Listener(
                     onPointerDown: isSelectionMode
                         ? null
@@ -369,6 +363,7 @@ class _HomePageState extends ConsumerState<HomePage> {
                             strings: strings,
                             isSelectionMode: isSelectionMode,
                             isSelected: isSelected,
+                            isOverdue: overdueTaskIds.contains(task.id),
                             completionStrikeProgress: completionPreview == null
                                 ? null
                                 : strikeProgress,
@@ -485,7 +480,7 @@ class _HomePageState extends ConsumerState<HomePage> {
     });
     ref.read(activeCollapsedProvider.notifier).state = targetCollapsed;
 
-    Future<void>.delayed(_completedSectionAnimationDuration, () {
+    Future<void>.delayed(_sectionCollapseDuration, () {
       if (!mounted || _activeSectionAnimatingToCollapsed != targetCollapsed) {
         return;
       }
@@ -864,6 +859,7 @@ class _HomePageState extends ConsumerState<HomePage> {
     required _SectionMoveSlot? moveSlot,
     required Widget child,
     bool visibleDuringAnimation = false,
+    Duration animationDuration = _sectionMoveDuration,
   }) {
     final measuredChild = KeyedSubtree(
       key: _taskSlotKey(slotName, taskId),
@@ -881,17 +877,20 @@ class _HomePageState extends ConsumerState<HomePage> {
 
     final source = moveSlot == _SectionMoveSlot.source;
     return TweenAnimationBuilder<double>(
-      duration: _sectionMoveDuration,
-      curve: Curves.linear,
+      duration: animationDuration,
+      curve: Curves.easeOutCubic,
       tween: Tween<double>(begin: source ? 1 : 0, end: source ? 0 : 1),
-      builder: (context, heightFactor, child) {
+      builder: (context, value, child) {
         return ClipRect(
           child: Align(
             alignment: Alignment.topCenter,
-            heightFactor: heightFactor,
-            child: Opacity(
-              opacity: visibleDuringAnimation ? heightFactor : 0,
-              child: child,
+            heightFactor: value,
+            child: FractionalTranslation(
+              translation: Offset(0, -0.04 * (1 - value)),
+              child: Opacity(
+                opacity: visibleDuringAnimation ? value : 0,
+                child: child,
+              ),
             ),
           ),
         );
@@ -1055,7 +1054,7 @@ class _HomePageState extends ConsumerState<HomePage> {
                 const Spacer(),
                 AnimatedRotation(
                   turns: collapsed ? 0 : 0.5,
-                  duration: _completedSectionAnimationDuration,
+                  duration: _sectionCollapseDuration,
                   curve: Curves.easeInOutCubic,
                   child: const Icon(
                     Icons.expand_more_rounded,
@@ -1099,7 +1098,7 @@ class _HomePageState extends ConsumerState<HomePage> {
                   const Spacer(),
                   AnimatedRotation(
                     turns: collapsed ? 0 : 0.5,
-                    duration: _completedSectionAnimationDuration,
+                    duration: _sectionCollapseDuration,
                     curve: Curves.easeInOutCubic,
                     child: const Icon(
                       Icons.expand_more_rounded,
@@ -1131,7 +1130,7 @@ class _HomePageState extends ConsumerState<HomePage> {
               .where((move) => move.targetCompleted)
               .toList(growable: false);
     return AnimatedSwitcher(
-      duration: _completedSectionAnimationDuration,
+      duration: _sectionCollapseDuration,
       switchInCurve: Curves.easeOutCubic,
       switchOutCurve: Curves.easeInCubic,
       transitionBuilder: _buildSectionTransition,
@@ -1223,95 +1222,91 @@ class _HomePageState extends ConsumerState<HomePage> {
     );
   }
 
-  /// 构建已过期任务区域，放在已完成区域下方。
-  Widget _buildOverdueTasksFooter(
-    List<Task> overdueTasks,
-    bool collapsed,
+  Widget _buildHomeEmptyState(
     AppStrings strings,
+    String? selectedLabel,
+    String searchQuery,
+    int? priorityFilter,
+    TaskStatusFilter statusFilter,
   ) {
+    final isInbox = selectedLabel == null;
+    final title = isInbox ? strings.emptyHomeTitle : strings.emptyLabelTitle;
+    final body = isInbox ? strings.emptyHomeBody : strings.emptyLabelBody;
+    final theme = Theme.of(context);
+    final darkMode = theme.brightness == Brightness.dark;
+    final iconColor = darkMode
+        ? const Color(0xFFA8D4C5)
+        : const Color(0xFF4E6C61);
+
     return Column(
       children: [
-        _buildOverdueDivider(overdueTasks, collapsed, strings),
-        AnimatedSwitcher(
-          duration: _completedSectionAnimationDuration,
-          switchInCurve: Curves.easeOutCubic,
-          switchOutCurve: Curves.easeInCubic,
-          transitionBuilder: _buildSectionTransition,
-          child: collapsed
-              ? const SizedBox.shrink(key: ValueKey('overdue-collapsed'))
-              : KeyedSubtree(
-                  key: const ValueKey('overdue-expanded'),
-                  child: Column(
-                    children: [
-                      for (var i = 0; i < overdueTasks.length; i++)
-                        _buildMeasuredTaskSlot(
-                          slotName: 'overdue',
-                          taskId: overdueTasks[i].id,
-                          moveSlot: null,
-                          child: GestureDetector(
-                            key: ValueKey('overdue-${overdueTasks[i].id}'),
-                            child: TaskCard(
-                              task: overdueTasks[i],
-                              strings: strings,
-                              onEditTap: () {
-                                _openTaskEditor(context, overdueTasks[i]);
-                              },
-                              onTap: () {
-                                _openTaskDetails(context, overdueTasks[i], strings);
-                              },
-                              onCompleteToggle: () {
-                                ref
-                                    .read(taskRepositoryProvider)
-                                    .toggleCompleted(overdueTasks[i]);
-                              },
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
+          child: _HomeSearchAndFilterBar(
+            searchController: _searchController,
+            strings: strings,
+            searchQuery: searchQuery,
+            priorityFilter: priorityFilter,
+            statusFilter: statusFilter,
+            onSearchChanged: (value) {
+              ref.read(taskSearchQueryProvider.notifier).state = value;
+            },
+            onPriorityFilterChanged: (value) {
+              ref.read(taskPriorityFilterProvider.notifier).state = value;
+            },
+            onStatusFilterChanged: (value) {
+              ref.read(taskStatusFilterProvider.notifier).state = value;
+            },
+          ),
         ),
-      ],
-    );
-  }
-
-  Widget _buildOverdueDivider(
-    List<Task> overdueTasks,
-    bool collapsed,
-    AppStrings strings,
-  ) {
-    return SizedBox(
-      height: _listItemExtent,
-      child: Padding(
-        padding: const EdgeInsets.only(bottom: _listItemGap),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(18),
-          onTap: () {
-            ref.read(overdueCollapsedProvider.notifier).state = !collapsed;
-          },
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4),
-            child: Row(
-              children: [
-                _SectionLabel(
-                  title: strings.overdue,
-                  subtitle: strings.itemCount(overdueTasks.length),
-                ),
-                const Spacer(),
-                AnimatedRotation(
-                  turns: collapsed ? 0 : 0.5,
-                  duration: _completedSectionAnimationDuration,
-                  curve: Curves.easeInOutCubic,
-                  child: const Icon(
-                    Icons.expand_more_rounded,
-                    color: Color(0xFF68756F),
+        Expanded(
+          child: Center(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(40, 0, 40, 80),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    isInbox
+                        ? Icons.inbox_outlined
+                        : Icons.label_outline_rounded,
+                    size: 48,
+                    color: iconColor,
                   ),
-                ),
-              ],
+                  const SizedBox(height: 20),
+                  Text(
+                    title,
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    body,
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: theme.hintColor,
+                    ),
+                  ),
+                  if (isInbox) ...[
+                    const SizedBox(height: 24),
+                    FilledButton.icon(
+                      onPressed: () {
+                        Navigator.of(context).push(
+                          buildTaskEditorRoute(),
+                        );
+                      },
+                      icon: const Icon(Icons.add_rounded, size: 20),
+                      label: Text(strings.newTask),
+                    ),
+                  ],
+                ],
+              ),
             ),
           ),
         ),
-      ),
+      ],
     );
   }
 

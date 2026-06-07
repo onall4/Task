@@ -1,3 +1,14 @@
+/*
+ * 日历页面。
+ *
+ * 这个文件负责实现日历页的完整 UI，包括：
+ * - 可展开/收起的月网格视图
+ * - 周分页滑动导航
+ * - 待办子页面 — 展示选定日期的任务列表
+ * - 习惯子页面 — 展示习惯列表和每日打卡
+ *
+ * 日历页是应用的核心页面之一，与首页和专注页并列在底部导航栏中。
+ */
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -363,9 +374,7 @@ class _CalendarTodoTabState extends ConsumerState<_CalendarTodoTab> {
                 .where(
                   (task) =>
                       task.status == TaskStatus.active.value &&
-                      taskOccursOnDate(
-                        task,
-                        effectiveTaskSchedule(task, schedules),
+                      taskOccursOnDate(task,
                         widget.selectedDate,
                       ),
                 )
@@ -1180,11 +1189,7 @@ int _taskCountInRange(
       if (task.status != TaskStatus.active.value) {
         return false;
       }
-      return taskOccursOnDate(
-        task,
-        effectiveTaskSchedule(task, schedules),
-        cursor,
-      );
+      return taskOccursOnDate(task, cursor);
     }).length;
     cursor = cursor.add(const Duration(days: 1));
   }

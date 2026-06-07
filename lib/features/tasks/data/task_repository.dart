@@ -22,7 +22,6 @@ import 'task_schedule_controller.dart';
 export 'local_database.dart' show DraftEntry, Task;
 export 'task_schedule_controller.dart'
     show
-        TaskRepeatRule,
         TaskScheduleMetadata,
         effectiveTaskSchedule,
         isSameTaskDate,
@@ -54,12 +53,9 @@ class TaskEditorValue {
     this.title = '',
     this.description = '',
     this.dueAt,
-    this.scheduledDate,
-    this.startAt,
     this.endAt,
     this.label,
     this.priority = 3,
-    this.repeatRule = TaskRepeatRule.none,
     this.isImportant = false,
     this.isUrgent = false,
   });
@@ -74,12 +70,9 @@ class TaskEditorValue {
       title: task.title,
       description: task.description ?? '',
       dueAt: task.dueAt,
-      scheduledDate: resolvedSchedule.scheduledDate,
-      startAt: resolvedSchedule.startAt,
       endAt: resolvedSchedule.endAt,
       label: task.label,
       priority: task.priority,
-      repeatRule: resolvedSchedule.repeatRule,
       isImportant: task.isImportant,
       isUrgent: task.isUrgent,
     );
@@ -91,7 +84,6 @@ class TaskEditorValue {
       title: draft.title ?? '',
       description: draft.description ?? '',
       dueAt: draft.dueAt,
-      scheduledDate: draft.dueAt == null ? null : taskDateOnly(draft.dueAt!),
       endAt: draft.dueAt,
       label: draft.label,
       priority: draft.priority,
@@ -103,22 +95,14 @@ class TaskEditorValue {
   final String title;
   final String description;
   final DateTime? dueAt;
-  final DateTime? scheduledDate;
-  final DateTime? startAt;
   final DateTime? endAt;
   final String? label;
   final int priority;
-  final TaskRepeatRule repeatRule;
   final bool isImportant;
   final bool isUrgent;
 
   TaskScheduleMetadata toScheduleMetadata() {
-    return TaskScheduleMetadata(
-      scheduledDate: scheduledDate ?? (dueAt == null ? null : taskDateOnly(dueAt!)),
-      startAt: startAt,
-      endAt: endAt ?? dueAt,
-      repeatRule: repeatRule,
-    );
+    return TaskScheduleMetadata(endAt: endAt ?? dueAt);
   }
 
   /// 复制当前值对象，并按需替换部分字段。
@@ -127,16 +111,11 @@ class TaskEditorValue {
     String? description,
     DateTime? dueAt,
     bool clearDueAt = false,
-    DateTime? scheduledDate,
-    bool clearScheduledDate = false,
-    DateTime? startAt,
-    bool clearStartAt = false,
     DateTime? endAt,
     bool clearEndAt = false,
     String? label,
     bool clearLabel = false,
     int? priority,
-    TaskRepeatRule? repeatRule,
     bool? isImportant,
     bool? isUrgent,
   }) {
@@ -144,14 +123,9 @@ class TaskEditorValue {
       title: title ?? this.title,
       description: description ?? this.description,
       dueAt: clearDueAt ? null : dueAt ?? this.dueAt,
-      scheduledDate: clearScheduledDate
-          ? null
-          : scheduledDate ?? this.scheduledDate,
-      startAt: clearStartAt ? null : startAt ?? this.startAt,
       endAt: clearEndAt ? null : endAt ?? this.endAt,
       label: clearLabel ? null : label ?? this.label,
       priority: priority ?? this.priority,
-      repeatRule: repeatRule ?? this.repeatRule,
       isImportant: isImportant ?? this.isImportant,
       isUrgent: isUrgent ?? this.isUrgent,
     );
@@ -162,12 +136,9 @@ class TaskEditorValue {
     return title.trim().isNotEmpty ||
         description.trim().isNotEmpty ||
         dueAt != null ||
-        scheduledDate != null ||
-        startAt != null ||
         endAt != null ||
         label != null ||
         priority != 3 ||
-        repeatRule != TaskRepeatRule.none ||
         isImportant ||
         isUrgent;
   }
@@ -220,9 +191,6 @@ final completedCollapsedProvider = StateProvider<bool>((ref) => true);
 
 /// 控制”进行中”分组是否折叠。
 final activeCollapsedProvider = StateProvider<bool>((ref) => false);
-
-/// 控制”已过期”分组是否折叠。
-final overdueCollapsedProvider = StateProvider<bool>((ref) => false);
 
 /// 任务仓储实现。
 ///

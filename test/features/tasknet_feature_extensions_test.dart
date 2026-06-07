@@ -5,65 +5,22 @@ import 'package:frontend/features/tasks/data/task_schedule_controller.dart';
 
 void main() {
   group('Task schedule metadata', () {
-    test('migrates legacy dueAt into scheduled date and end time', () {
+    test('creates metadata from task dueAt', () {
       final dueAt = DateTime(2026, 6, 4, 18, 30);
       final task = _task(dueAt: dueAt);
 
       final schedule = TaskScheduleMetadata.fromTask(task);
 
-      expect(schedule.scheduledDate, DateTime(2026, 6, 4));
       expect(schedule.endAt, dueAt);
-      expect(schedule.repeatRule, TaskRepeatRule.none);
     });
 
-    test('matches daily, weekly, and monthly repeat instances', () {
-      final task = _task();
-      final base = DateTime(2026, 6, 4, 9);
+    test('task occurs on date', () {
+      final dueAt = DateTime(2026, 6, 4, 9);
+      final task = _task(dueAt: dueAt);
 
-      expect(
-        taskOccursOnDate(
-          task,
-          TaskScheduleMetadata(
-            scheduledDate: base,
-            repeatRule: TaskRepeatRule.daily,
-          ),
-          DateTime(2026, 6, 8),
-        ),
-        isTrue,
-      );
-      expect(
-        taskOccursOnDate(
-          task,
-          TaskScheduleMetadata(
-            scheduledDate: base,
-            repeatRule: TaskRepeatRule.weekly,
-          ),
-          DateTime(2026, 6, 11),
-        ),
-        isTrue,
-      );
-      expect(
-        taskOccursOnDate(
-          task,
-          TaskScheduleMetadata(
-            scheduledDate: base,
-            repeatRule: TaskRepeatRule.monthly,
-          ),
-          DateTime(2026, 7, 4),
-        ),
-        isTrue,
-      );
-      expect(
-        taskOccursOnDate(
-          task,
-          TaskScheduleMetadata(
-            scheduledDate: base,
-            repeatRule: TaskRepeatRule.weekly,
-          ),
-          DateTime(2026, 6, 12),
-        ),
-        isFalse,
-      );
+      expect(taskOccursOnDate(task, DateTime(2026, 6, 4)), isTrue);
+      expect(taskOccursOnDate(task, DateTime(2026, 6, 5)), isFalse);
+      expect(taskOccursOnDate(task, DateTime(2026, 6, 3)), isFalse);
     });
 
     test('controller persists schedule changes and removals', () async {
@@ -72,10 +29,7 @@ void main() {
       await Future<void>.delayed(Duration.zero);
 
       final schedule = TaskScheduleMetadata(
-        scheduledDate: DateTime(2026, 6, 4),
-        startAt: DateTime(2026, 6, 4, 9),
         endAt: DateTime(2026, 6, 4, 10),
-        repeatRule: TaskRepeatRule.weekly,
       );
       await controller.saveSchedule('task-1', schedule);
 

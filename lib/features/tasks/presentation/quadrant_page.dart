@@ -1,3 +1,9 @@
+/*
+ * 四象限页面。
+ *
+ * 这个文件负责按艾森豪威尔矩阵（重要 × 紧急）将任务划分为四个象限展示。
+ * 每个象限显示对应分类下的任务列表，帮助用户直观地管理优先级。
+ */
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
